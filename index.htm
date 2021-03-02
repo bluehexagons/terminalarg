@@ -1,0 +1,1313 @@
+<html>
+	<head>
+		<style type="text/css">
+			@font-face {
+				font-family: Terminus;
+				src: local("Terminus"),
+					url(Terminus.ttf);
+			}
+			@font-face {
+				font-family: Terminus;
+				src: local("Terminus"),
+					url(TerminusBold.ttf);
+				font-weight: bold;
+			}
+
+			body {
+				margin: 0px;
+				padding: 2px;
+				background: black;
+			}
+			#terminal {
+				font-family: Terminus;
+				width: 100%;
+				height: 100%;
+				background: black;
+				color: white;
+				position: relative;
+				overflow: auto;
+
+				cursor: text;
+			}
+			#terminal pre {
+				display: block;
+				width: 100%;
+				height: 100%;
+				margin: 0px;
+				padding: 0px;
+
+				font-family: Terminus;
+				font-size: 16px;
+				width: 100%;
+				height: 100%;
+				background: black;
+				color: white;
+
+				word-wrap: auto;
+			}
+
+			#terminal pre::selection {
+				background: white;
+				color: black;
+			}
+
+			#terminal textarea {
+				display: block;
+				width: 100%;
+				height: 100%;
+				padding: 0px;
+				margin: 0px;
+				position: absolute;
+				left: 0px;
+				top: 0px;
+				background: none;
+				border: none;
+
+				font-family: Terminus;
+				font-size: 16px;
+				width: 100%;
+				height: 100%;
+				background: black;
+				color: white;
+			}
+
+			#terminal textarea::selection {
+				background: white;
+				color: black;
+			}
+
+			#terminal a {
+				color: #aaa;
+				text-decoration: underline;
+			}
+			#terminal a * {
+				text-decoration: underline;
+			}
+			#terminal a:hover {
+				color: #dedede;
+			}
+
+			#terminal img {
+				cursor: default;
+			}
+
+			#terminal img.embedded {
+				padding: 3px;
+			}
+
+			.terminal-cursor {
+				background: white;
+				color: black;
+			}
+		</style>
+	</head>
+	<body>
+		<pre id="greeting" data-indent="3">
+		</pre>
+		<pre id="startup">
+			wget thumbs/foodguide.png
+			wget scores.js
+			wait
+			img foodguide.png
+			chmod +x scores.js
+		</pre>
+		<div id="terminal"></div>
+<script>
+	(function (global, name) {
+		'use strict';
+		var Dir = function Dir() {
+				this.map = {};
+			},
+			Filesystem = function Filesystem(serialized) {
+				this.root = new Dir();
+			},
+			File = function File(data, options, global) {
+				var loadText, that;
+				this.href = options && options.location;
+				if (data instanceof Blob) {
+					this.binaryContent = data;
+					if (data.type.substring(0, 4) === 'text' || data.type.indexOf('javascript') !== -1) {
+						loadText = new FileReader();
+						that = this;
+						this.textContent = '[processing binary text file]';
+						if (global && !isNaN(global.async)) {
+							global.async++;
+						}
+						loadText.onload = function (e) {
+							that.textContent = e.target.result;
+							if (global && !isNaN(global.async)) {
+								global.async--;
+								terminal.event.resume && terminal.event.resume();
+							}
+						};
+						loadText.readAsText(data);
+					} else {
+						this.textContent = '[binary file]';
+					}
+				} else {
+					this.textContent = data;
+					this.binaryContent = null;
+				}
+			},
+			NetworkFile = function NetworkFile(href, filename, options) {
+				this.href = href;
+				this.filename = filename;
+			},
+			findNotWhitespace = /\S/,
+			findEndWhitespace = /\s*$/,
+			asyncWaitEvent = function asyncWaitEvent(global, file, line) {
+				this.global = global;
+				this.file = file;
+				this.line = line;
+				this.getPrefix = function () { return ''; };
+				this.resume = function () {
+					if (this.global.async <= 0) {
+						this.file.run(this.global, this.line);
+						this.global.terminal.popEvent();
+						this.global.terminal.showInput();
+					}
+				};
+			},
+			runAsScript = function (global, start) {
+				var lines = this.textContent.split('\n'),
+					line,
+					i,
+					l,
+					args = global.args,
+					terminal = global.terminal,
+					path = terminal.path,
+					home = terminal.home,
+					filesystem = terminal.filesystem,
+					bin = terminal.bin,
+					local = global.local;
+				l = args.length;
+				for (i = 0; i < l; i++) {
+					local['arg' + i] = args[i];
+				}
+				local.input = global.input;
+				l = lines.length;
+				global.async = 0;
+				for (i = start || 0; i < l; i++) {
+					line = lines[i];
+					line = line.substring(line.search(findNotWhitespace), line.search(findEndWhitespace));
+					if (line === 'wait') {
+						if (global.async > 0) {
+							global.terminal.hideInput();
+							global.terminal.pushEvent(new asyncWaitEvent(global, this, i + 1));
+							break;
+						}
+					} else {
+						global.value = line;
+						global.terminal.runCommand(global);
+						/*global.terminal.runCommand({
+							terminal: terminal,
+							args: null,
+							input: null,
+							value: line,
+							path: path,
+							home: home,
+							filesystem: filesystem,
+							bin: bin,
+							local: local
+						});*/
+					}
+				}
+			},
+			findScriptType = /^\s*#([^\s]+)\s*\n/, //first arg will be type
+			Executable = function Executable(data, options) {
+				var type
+				//executables shouldn't be part of the file system, rework later
+				if (data instanceof Function) {
+					this.run = data;
+				} else {
+					type = findScriptType.exec(data.substring(0, data.indexOf(' ')));
+					if (type !== null && type[1].toLowerCase() === 'javascript') {
+						this.run = new Function('global', data.substring(data.indexOf('\n') + 1));
+					} else {
+						//if no language specified, use scripting language
+						this.run = runAsScript;
+						this.textContent = data;
+					}
+				}
+			},
+			FileLocation = function FileLocation(directory, name, file) {
+				this.directory = directory;
+				this.name = name;
+			};
+
+		Filesystem.prototype.add = function (path, filename, file) {
+			var dir = this.get(path);
+			if (dir instanceof Dir) {
+				dir.map[filename] = file;
+				return true;
+			}
+			return false;
+		};
+		Filesystem.prototype.getPath = function (path, from, home) {
+			var split, i = 0, l,
+				current = '',
+				dest;
+			if (path[0] === '~') {
+				current = home || '';
+				i = 1;
+			} else if (path[0] !== '/') {
+				//current = from;
+				path = from + '/' + path;
+			}
+			split = path.split('/');
+			l = split.length;
+			for (; i < l; i++) {
+				dest = split[i];
+				if (dest === '' || dest === '.') {
+				} else if (dest === '..') {
+					current = current.substring(0, current.lastIndexOf('/'));
+				} else {
+					current += '/' + dest;
+				}
+			}
+			return current || '/';
+		};
+		Filesystem.prototype.getLocation = function (path, from, home) {
+			var split,
+				dir = this.root,
+				i,
+				l;
+			path = this.getPath(path, from, home);
+			split = path.split('/');
+			for (i = 0, l = split.length; i < l; i++) {
+				if (split[i]) {
+					if (!(dir instanceof Dir)) {
+						return null;
+					}
+					dir = dir.map[split[i]];
+					if (!dir) {
+						return null;
+					}
+				}
+			}
+			return dir;
+		};
+		Filesystem.prototype.get = function (path, from, home) {
+			var split,
+				dir = this.root,
+				i,
+				l;
+			path = this.getPath(path, from, home);
+			split = path.split('/');
+			for (i = 0, l = split.length; i < l; i++) {
+				if (split[i]) {
+					if (!(dir instanceof Dir)) {
+						return null;
+					}
+					dir = dir.map[split[i]];
+					if (!dir) {
+						return null;
+					}
+				}
+			}
+			return dir;
+		};
+		Executable.prototype = new File();
+		Executable.prototype.getSource = function () {
+			var code = this.run.toString();
+			return '#javascript\n' + code.substring(code.indexOf('\n', code.indexOf('{')) + 1, code.lastIndexOf('\n'));
+		};
+
+		Filesystem.Dir = Dir;
+		Filesystem.File = File;
+		Filesystem.Executable = Executable;
+
+		global[name || 'Filesystem'] = Filesystem;
+	}(window));
+	window.keyCodes = {
+		backspace: 8,
+		enter: 13,
+		up: 38,
+		right: 39,
+		down: 40,
+		left: 37
+	};
+	window.Modifiers = {
+		alt: 1,
+		ctrl: 2,
+		shift: 3
+	};
+	(function (global, name) {
+		'use strict';
+		var Terminal = function Terminal(hostElement, filesystem, options) {
+				var pre = document.createElement('pre'),
+					home,
+					startPath,
+					elements;
+
+				options = options || {};
+				home = options.home;
+				startPath = options.startPath;
+
+				this.host = hostElement;
+				this.filesystem = filesystem;
+				this.host.appendChild(pre);
+				this.home = home;
+				this.path = startPath || this.home || '/';
+				this.bin = this.filesystem.get(options.bin || '/bin') || this.filesystem.get('/bin') || null;
+				this.currentValue = '';
+				this.value = options.startValue || '';
+				this.cursor = this.value.length;
+				this.width = options.width || 80;
+				this.env = {};
+				this.history = [];
+				this.historyScroll = 0;
+				this.events = [];
+				this.eventCounter = 0;
+				this.pushEvent(terminalMainEvent);
+				this.inputHidden = false;
+
+				elements = {};
+				this.elements = elements;
+				elements.pre = pre;
+				elements.inputLine = document.createElement('div');
+				elements.pathText = document.createTextNode('');
+				elements.inputLine.appendChild(elements.pathText);
+				elements.inputText = document.createTextNode('');
+				elements.inputLine.appendChild(elements.inputText);
+				elements.cursor = document.createElement('span');
+				elements.cursorText = document.createTextNode(' ');
+				elements.cursor.appendChild(elements.cursorText);
+				elements.cursor.className = 'terminal-cursor';
+				elements.inputLine.appendChild(elements.cursor);
+				elements.inputAfter = document.createTextNode('');
+				elements.inputLine.appendChild(elements.inputAfter);
+				pre.appendChild(elements.inputLine);
+
+				setupListeners(this);
+				updateText(this);
+			},
+			getArgs = function (text) {
+				var inQuotes = 0,
+					args = [],
+					current = null,
+					ws = '\t ',
+					qt = ' \'"',
+					i,
+					l = text.length,
+					ch;
+				for (i = 0; i < l; i++) {
+					ch = text[i];
+					if (current === null) {
+						if (ws.indexOf(ch) === -1) {
+							inQuotes = Math.max(qt.indexOf(ch), 0);
+							if (!inQuotes) {
+								current = ch;
+							} else {
+								current = '';
+							}
+						}
+					} else {
+						if ((!inQuotes && ws.indexOf(ch) !== -1) || (qt.indexOf(ch) === inQuotes)) {
+							args.push(current);
+							current = null;
+							inQuotes = 0;
+						} else {
+							current += ch;
+						}
+					}
+				}
+				if (current) {
+					args.push(current);
+				}
+				return args;
+			},
+			findInput = /\w+\s+(.*)/,
+			getInput = function (text) {
+				var match = text.match(findInput);
+				return match ? match[1] : '';
+			},
+			specialActions = (function () {
+				var actions = {};
+				actions[keyCodes.backspace] = function (terminal, modifiers) {
+					var lastSpaceAt;
+					if (terminal.value.length > 0) {
+						if (modifiers & Modifiers.ctrl) {
+							lastSpaceAt = terminal.value.lastIndexOf(' ', terminal.cursor - 1) + 1;
+							if (lastSpaceAt === terminal.cursor) {
+								lastSpaceAt = terminal.value.lastIndexOf(' ', terminal.cursor - 2) + 1;
+							}
+
+							terminal.value = terminal.value.substr(0, lastSpaceAt) + terminal.value.substring(terminal.cursor);
+							terminal.cursor = lastSpaceAt;
+							updateText(terminal);
+						} else {
+							terminal.value = terminal.value.substr(0, terminal.cursor - 1) + terminal.value.substring(terminal.cursor);
+							terminal.cursor--;
+							updateText(terminal);
+						}
+					}
+				};
+				actions[keyCodes.up] = function (terminal) {
+					if (terminal.historyScroll === 0) {
+						terminal.currentValue = terminal.value;
+					}
+					terminal.historyScroll = Math.min(terminal.historyScroll + 1, terminal.history.length);
+					if (terminal.historyScroll === 0) {
+						terminal.value = terminal.currentValue;
+					} else {
+						terminal.value = terminal.history[terminal.history.length - terminal.historyScroll];
+					}
+					terminal.cursor = terminal.value.length;
+					updateText(terminal);
+				};
+				actions[keyCodes.down] = function (terminal) {
+					terminal.historyScroll = Math.max(terminal.historyScroll - 1, 0);
+					if (terminal.historyScroll === 0) {
+						terminal.value = terminal.currentValue;
+					} else {
+						terminal.value = terminal.history[terminal.history.length - terminal.historyScroll];
+					}
+					terminal.cursor = terminal.value.length;
+					updateText(terminal);
+				};
+				actions[keyCodes.left] = function (terminal) {
+					terminal.cursor = Math.max(terminal.cursor - 1, 0);
+					updateText(terminal);
+				};
+				actions[keyCodes.right] = function (terminal) {
+					terminal.cursor = Math.min(terminal.cursor + 1, terminal.value.length);
+					updateText(terminal);
+				};
+				actions[keyCodes.enter] = function (terminal) {
+					var target,
+						global;
+					terminal.echo(terminal.event.getPrefix(terminal) + terminal.value);
+					if (terminal.value === '!!') {
+						terminal.value = terminal.history[terminal.history.length - 1];
+						terminal.historyScroll = 1;
+					} else if (terminal.value.substring(0, 2) === '!!') {
+						terminal.value = terminal.history[terminal.history.length - 1] + ' ' + terminal.value.substring(2);
+					}
+					if (terminal.historyScroll && terminal.value === terminal.history[terminal.history.length - terminal.historyScroll]) {
+						terminal.history.splice(terminal.history.length - terminal.historyScroll, 1);
+					}
+					terminal.history.push(terminal.value);
+					terminal.historyScroll = 0;
+					//args = getArgs(terminal.value);
+					global = {
+						terminal: terminal,
+						args: null,
+						input: null,
+						value: terminal.value,
+						path: terminal.path,
+						home: terminal.home,
+						filesystem: terminal.filesystem,
+						bin: terminal.bin,
+						local: {}
+					};
+
+					terminal.resetInput();
+					terminal.runCommand(global);
+					terminal.elements.inputLine.scrollIntoView();
+				};
+				return actions;
+			}()),
+			textInputActions = (function () {
+				var actions = {};
+				actions[keyCodes.backspace] = specialActions[keyCodes.backspace];
+				actions[keyCodes.left] = specialActions[keyCodes.left];
+				actions[keyCodes.right] = specialActions[keyCodes.right];
+				actions[keyCodes.enter] = function (terminal) {
+					var evt = terminal.popEvent();
+					terminal.print(evt.getPrefix() + terminal.value);
+					evt.callback(terminal.value);
+					terminal.resetInput();
+				};
+				return actions;
+			}()),
+			updateText = function (terminal) {
+				var elements = terminal.elements;
+				elements.pathText.textContent = terminal.event.getPrefix(terminal);
+				elements.inputText.textContent = terminal.value.substring(0, terminal.cursor);
+				elements.cursorText.textContent = terminal.value.substr(terminal.cursor, 1) || ' ';
+				elements.inputAfter.textContent = terminal.value.substring(terminal.cursor + 1);
+			},
+			feedTyping = function (terminal, keyCode, keyChar, modifiers) {
+				terminal.value = terminal.value.substring(0, terminal.cursor) + keyChar + terminal.value.substring(terminal.cursor);
+				terminal.cursor++;
+				updateText(terminal);
+			},
+			feedKeys = function (terminal, keyCode, modifiers) {
+				specialActions[keyCode](terminal, modifiers);
+			},
+			terminalMainEvent = {
+				onpress: function (terminal, keyCode, character, modifiers, e) {
+					if (character && characters.indexOf(character) !== -1) {
+						feedTyping(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+					}
+				},
+				onkeydown: function (terminal, keyCode, modifiers, e) {
+					if (specialActions.hasOwnProperty(e.keyCode)) {
+						e.preventDefault();
+						specialActions[e.keyCode](terminal, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+						//feedKeys(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+					}
+				},
+				getPrefix: function (terminal) {
+					return (terminal.home ? terminal.path.replace(terminal.home, '~') : terminal.path) + '$ ';
+				}
+			},
+			TerminalInputEvent = (function () {
+				var constructor = function TerminalInputEvent(callback, prompt) {
+					this.callback = callback;
+					this.prompt = prompt || '';
+				};
+				constructor.prototype = {
+					onpress: function (terminal, keyCode, character, modifiers, e) {
+						if (character && characters.indexOf(character) !== -1) {
+							feedTyping(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+						}
+					},
+					onkeydown: function (terminal, keyCode, modifiers, e) {
+						if (textInputActions.hasOwnProperty(e.keyCode)) {
+							e.preventDefault();
+							textInputActions[e.keyCode](terminal, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+							//feedKeys(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+						}
+					},
+					getPrefix: function (terminal) {
+						return this.prompt;
+					}
+				};
+				return constructor;
+			}()),
+			//kind of a daft way to do it, but it's easy and doesn't require much code
+			characters = '`1234567890-=qwertyuiop[]\\asdfghjkl;\'zxcvbnm,./ ~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>?',
+			setupListeners = function (terminal) {
+				var host = terminal.host;
+				addEventListener('keypress', function (e) {
+					var character = String.fromCharCode(e.keyCode);
+					terminal.event.onpress && terminal.event.onpress(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift, e);
+				}, false);
+				addEventListener('keydown', function (e) {
+					terminal.event.onkeydown && terminal.event.onkeydown(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift, e);
+				}, false);
+			},
+			formatChars = '*{}[]()',
+			removeChildren = function (element) {
+				while (element.hasChildNodes()) {
+					element.removeChild(element.firstChild);
+				}
+			},
+			//%local% %%global% %%%environment%
+			findVars = /%+(\w+)%/,
+			varEnv = null,
+			varGlobal = null,
+			varLocal = null,
+			replaceVars = function (match, variable) {
+				if (match[1] === '%') {
+					if (match[2] === '%') {
+						return varEnv[variable];
+					}
+					return varGlobal[variable];
+				}
+				return varLocal[variable];
+			};
+
+		Terminal.prototype.hideInput = function () {
+			this.inputHidden = true;
+			this.elements.pre.removeChild(this.elements.inputLine);
+		};
+		Terminal.prototype.showInput = function () {
+			this.inputHidden = false;
+			this.elements.pre.appendChild(this.elements.inputLine);
+			this.elements.inputLine.scrollIntoView();
+		};
+		Terminal.prototype.pushEvent = function (evt) {
+			this.events.push(evt);
+			this.event = evt;
+			return this.eventCounter++;
+		};
+		Terminal.prototype.popEvent = function (evt) {
+			if (!evt) {
+				this.event = this.events[this.events.length - 2];
+				return this.events.pop();
+			}
+			if (evt === this.event) {
+				this.event = this.events[this.events.length - 2];
+				return this.events.pop();
+			}
+		};
+		Terminal.prototype.getInput = function (callback, prompt) {
+			this.pushEvent(new TerminalInputEvent(callback, prompt));
+			terminal.resetInput();
+		};
+		Terminal.prototype.resetInput = function () {
+			this.cursor = 0;
+			this.value = '';
+			this.updateText();
+		};
+		Terminal.prototype.runCommand = function (global) {
+			var terminal,
+				args,
+				input,
+				path,
+				home,
+				filesystem,
+				bin,
+				target;
+
+			if (typeof global === 'string' || global instanceof String) {
+				global = {
+					terminal: this,
+					args: null,
+					input: null,
+					value: global,
+					path: this.path,
+					home: this.home,
+					filesystem: this.filesystem,
+					bin: this.bin,
+					local: {}
+				};
+			}
+
+			terminal = global.terminal;
+			input = global.value;
+			path = global.path;
+			home = global.home;
+			filesystem = global.filesystem;
+			bin = global.bin;
+
+			varEnv = terminal.env;
+			varGlobal = global;
+			varLocal = global.local;
+			input = input.replace(findVars, replaceVars);
+			global.input = getInput(input);
+			args = getArgs(input);
+			global.args = args;
+			if (args.length > 0) {
+				target = filesystem.get(args[0], path, home);
+				if (target instanceof Filesystem.Executable) {
+					target.run(global);
+				} else if (bin !== null) {
+					target = bin.map[args[0]];
+					if (target instanceof Filesystem.Executable) {
+						target.run(global);
+					} else {
+						terminal.echo(args[0] + ': command not found');
+					}
+				} else {
+					terminal.echo(args[0] + ': command not found');
+				}
+			}
+		};
+		Terminal.prototype.updateText = function () {
+			updateText(this);
+		};
+		Terminal.prototype.clear = function () {
+			removeChildren(this.elements.pre);
+			this.elements.pre.appendChild(this.elements.inputLine);
+		};
+		Terminal.prototype.echo = function (text, line, doNotPush) {
+			var newLine = line || document.createElement('div'),
+				lineText = document.createTextNode(text || ' ');
+			newLine.appendChild(lineText);
+			if (!doNotPush) {
+				if (!this.inputHidden) {
+					this.elements.pre.insertBefore(newLine, this.elements.inputLine);
+					newLine.scrollIntoView();
+				} else {
+					this.elements.pre.appendChild(newLine);
+					newLine.scrollIntoView();
+				}
+			}
+		};
+		Terminal.prototype.print = function (text, line, doNotPush) {
+			var newLine = line || document.createElement('div'),
+				segment = newLine,
+				container = null,
+				textNode,
+				styles = {},
+				style,
+				escaped = false,
+				colorData,
+				textHrefSeparator,
+				processingLink = false,
+				href,
+				anchorElement,
+				i,
+				l = text.length;
+			removeChildren(newLine);
+			for (i = 0; i < l; i++) {
+				if (text[i] === '\\' && formatChars.indexOf(text[i + 1]) !== -1) {
+					escaped = true;
+				} else if (!escaped && text[i] === '{') {
+					colorData = text.substring(i + 1, text.indexOf(' ', i + 1));
+					if (colorData.indexOf(',') !== -1) {
+						styles.background = colorData.substring(colorData.indexOf(',') + 1);
+						if (colorData.indexOf(',') > 0) {
+							styles.color = colorData.substring(0, colorData.indexOf(','));
+						}
+					} else {
+						styles.color = colorData;
+					}
+					i += colorData.length + 1;
+					container = null;
+				} else if (!escaped && text[i] === '}') {
+					delete styles.color;
+					delete styles.background;
+					container = null;
+				} else if (!escaped && text[i] === '*') {
+					if (styles.fontWeight) {
+						delete styles.fontWeight;
+					} else {
+						styles.fontWeight = 'bold';
+					}
+					container = null;
+				} else if (!escaped && text[i] === '[' &&
+						(textHrefSeparator = text.indexOf('](', i)) !== -1 &&
+							(text.indexOf('[', i + 1) === -1 ||
+							text.indexOf('[', i + 1) > textHrefSeparator) &&
+						textHrefSeparator === text.indexOf(']', i) &&
+						text.indexOf(')', textHrefSeparator) !== -1) {
+					anchorElement = document.createElement('a');
+					anchorElement.target = '_blank';
+					href = text.substring(textHrefSeparator + 2, text.indexOf(')', textHrefSeparator));
+					//* is a command with a real URL at the end of it,
+					//## is just a command (anchor's href will be #)
+					if (href[0] === '*' || (href[0] === '#' && href[1] === '#')) {
+						anchorElement.dataset.command = href[0] === '#' ? href.substring(2) : href.substring(1);
+						anchorElement.title = anchorElement.dataset.command;
+						anchorElement.addEventListener('click', function (e) {
+							if (e.button === 0) { //only respond to left clicks
+								e.preventDefault();
+								terminal.print(terminal.event.getPrefix(terminal) + e.target.parentNode.dataset.command);
+								terminal.runCommand({
+									terminal: terminal,
+									args: null,
+									input: null,
+									value: e.target.parentNode.dataset.command,
+									path: terminal.path,
+									home: terminal.home,
+									filesystem: terminal.filesystem,
+									bin: terminal.bin,
+									local: {}
+								});
+							}
+						});
+						if (href[0] === '#') {
+							href = '#';
+						} else {
+							href = href.substring(href.lastIndexOf(' ') + 1);
+						}
+					}
+					anchorElement.href = href;
+					newLine.appendChild(anchorElement);
+					segment = anchorElement;
+					container = null;
+					processingLink = true;
+				} else if (!escaped && text[i] === ']' && processingLink) {
+					segment = newLine;
+					container = null;
+					processingLink = false;
+					i = text.indexOf(')', i);
+				} else {
+					if (container === null) {
+						container = document.createElement('span');
+						textNode = document.createTextNode('');
+						container.appendChild(textNode);
+						segment.appendChild(container);
+						for (style in styles) {
+							if (styles.hasOwnProperty(style)) {
+								container.style[style] = styles[style];
+							}
+						}
+					}
+					textNode.textContent += text[i];
+					escaped = false;
+				}
+			}
+			if (!newLine.childNodes.length) {
+				newLine.appendChild(document.createTextNode(' '));
+			}
+			if (!doNotPush) {
+				if (!this.inputHidden) {
+					this.elements.pre.insertBefore(newLine, this.elements.inputLine);
+					newLine.scrollIntoView();
+				} else {
+					this.elements.pre.appendChild(newLine);
+					newLine.scrollIntoView();
+				}
+			}
+		};
+		window.getArgs = getArgs;
+		global[name || 'Terminal'] = Terminal;
+	}(window));
+
+	(function () {
+		'use strict';
+		var fs = new Filesystem();
+		fs.add('/', 'home', new Filesystem.Dir());
+		fs.add('/', 'bin', new Filesystem.Dir());
+		fs.add('/bin', 'cd', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				destName = args[1] || '~',
+				destination = terminal.filesystem.get(destName, terminal.path, terminal.home);
+
+			if (destination instanceof Filesystem.Dir) {
+				terminal.path = terminal.filesystem.getPath(destName, terminal.path, terminal.home);
+				terminal.updateText();
+			} else {
+				if (!destination) {
+					terminal.echo('cd: ' + destName + ': No such file or directory');
+				} else {
+					terminal.echo('cd: ' + destName + ': Not a directory');
+				}
+			}
+		}));
+		fs.add('/bin', 'dir', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				rows = 0,
+				lengths = [],
+				files = [],
+				f,
+				width,
+				maxWidth,
+				terminalWidth = terminal.width,
+				widths = [],
+				dir = global.filesystem.get(global.path),
+				map = dir.map,
+				i,
+				j,
+				l,
+				line;
+			for (f in map) {
+				if (map.hasOwnProperty(f)) {
+					files.push(f);
+					lengths.push(f.length);
+				}
+			}
+			l = lengths.length;
+			do {
+				rows++;
+				maxWidth = 0;
+				width = 0;
+				for (i = 0; i < l; i++) {
+					if (i % rows === 0) {
+						width += maxWidth;
+						maxWidth = lengths[i];
+						widths[i / rows | 0] = maxWidth;
+					} else if (lengths[i] > maxWidth) {
+						maxWidth = lengths[i];
+						widths[i / rows | 0] = maxWidth;
+					}
+				}
+				width += maxWidth;
+			} while (width + (l / rows | 0) * 2 > terminalWidth && rows < l);
+
+			for (j = 0; j < rows; j++) {
+				line = '';
+				for (i = j; i < l; i += rows) {
+					line += files[i] + Array(widths[i / rows | 0] + 2 - lengths[i]).join(' ');
+				}
+				terminal.echo(line);
+			}
+		}));
+		fs.add('/bin', 'ls', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				rows = 0,
+				lengths = [],
+				names = [],
+				files = [],
+				f,
+				width,
+				maxWidth,
+				terminalWidth = terminal.width,
+				widths = [],
+				dir = global.filesystem.get(global.path),
+				map = dir.map,
+				i,
+				j,
+				l,
+				line,
+				color,
+				end;
+			for (f in map) {
+				if (map.hasOwnProperty(f)) {
+					files.push(map[f]);
+					names.push(f);
+					lengths.push(f.length);
+				}
+			}
+			l = lengths.length;
+			do {
+				rows++;
+				maxWidth = 0;
+				width = 0;
+				for (i = 0; i < l; i++) {
+					if (i % rows === 0) {
+						width += maxWidth;
+						maxWidth = lengths[i];
+						widths[i / rows | 0] = maxWidth;
+					} else if (lengths[i] > maxWidth) {
+						maxWidth = lengths[i];
+						widths[i / rows | 0] = maxWidth;
+					}
+				}
+				width += maxWidth;
+			} while (width + (l / rows | 0) * 2 > terminalWidth && rows < l);
+
+			for (j = 0; j < rows; j++) {
+				line = '';
+				for (i = j; i < l; i += rows) {
+					color = '';
+					end = '';
+					if (files[i] instanceof Filesystem.Dir) {
+						color = '*{steelblue ';
+						end = '}*';
+					} else if (files[i] instanceof Filesystem.Executable) {
+						color = '*{lawngreen ';
+						end = '}*';
+					}
+					line += color + names[i] + end + Array(widths[i / rows | 0] + 2 - lengths[i]).join(' ');
+				}
+				terminal.print(line);
+			}
+		}));
+		fs.add('/bin', 'cat', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				file,
+				lines,
+				i,
+				l,
+				formatted = false;
+
+			if (args[1] === '-f') {
+				file = global.filesystem.get(args[2], global.path, global.home);
+				formatted = true;
+			} else {
+				file = global.filesystem.get(args[1], global.path, global.home);
+			}
+			
+			if (file !== null) {
+				if (file instanceof Filesystem.File) {
+					if (file instanceof Filesystem.Executable) {
+						lines = file.getSource().replace(/\t/g, '    ').split('\n');
+					} else {
+						lines = file.textContent.replace(/\t/g, '    ').split('\n');
+					}
+					l = lines.length;
+					for (i = 0; i < l; i++) {
+						if (!formatted) {
+							terminal.echo(lines[i]);
+						} else {
+							terminal.print(lines[i]);
+						}
+					}
+				} else {
+					terminal.echo('cat: ' + args[1] + ': Is a directory');
+				}
+			} else {
+				terminal.echo('cat: ' + args[1] + ': No such file or directory');
+			}
+		}));
+		fs.add('/bin', 'mkdir', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dir = global.filesystem.get(global.path);
+			if (!dir.map.hasOwnProperty(args[1])) {
+				dir.map[args[1]] = new Filesystem.Dir();
+			} else {
+				terminal.echo('mkdir: cannot create directory `' + args[1] + '\': File exists');
+			}
+		}));
+		fs.add('/bin', 'rmdir', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				parent = global.filesystem.get(global.path),
+				target = parent.map[args[1]],
+				contents = '';
+			if (target instanceof Filesystem.Dir) {
+				for (contents in target.map) {
+					if (target.map.hasOwnProperty(contents)) {
+						contents = ' ';
+						break;
+					}
+					contents = '';
+				}
+				if (!contents) {
+					delete parent.map[args[1]];
+				} else {
+					terminal.echo('rmdir: failed to remove `' + args[1] + '\': Directory not empty');
+				}
+			} else {
+				terminal.echo('rmdir: failed to remove `' + args[1] + '\': Not a directory');
+			}
+		}));
+		fs.add('/bin', 'touch', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dir = global.filesystem.get(global.path);
+			if (!dir.map.hasOwnProperty(args[1])) {
+				dir.map[args[1]] = new Filesystem.File('');
+			}
+		}));
+		fs.add('/bin', 'rm', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dir = global.filesystem.get(global.path);
+			if (dir.map.hasOwnProperty(args[1]) && dir.map[args[1]] instanceof Filesystem.File) {
+				delete dir.map[args[1]];
+			} else if (dir.map.hasOwnProperty(args[1]) && dir.map[args[1]] instanceof Filesystem.Directory) {
+				terminal.echo('rm: cannot remove `' + args[1] + '\': Is a directory');
+			} else {
+				terminal.echo('rm: cannot remove `' + args[1] + '\': No such file or directory');
+			}
+		}));
+		fs.add('/bin', 'chmod', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dirPath = global.filesystem.getPath(args[2], global.path, global.home),
+				filename = dirPath.substring(dirPath.lastIndexOf('/') + 1),
+				dir,
+				file = global.filesystem.get(args[2], global.path, global.home);
+			dirPath = dirPath.substring(0, dirPath.lastIndexOf('/')) || '/';
+			dir = global.filesystem.get(dirPath);
+			if (file instanceof Filesystem.File) {
+				if (args[1].indexOf('+x') !== -1) {
+					if (file instanceof Filesystem.Executable) {
+						terminal.echo('chmod: file ' + filename + ' already executable');
+					} else {
+						dir.map[filename] = new Filesystem.Executable(file.textContent);
+					}
+				} else if (args[1].indexOf('-x') !== -1) {
+					if (file instanceof Filesystem.Executable) {
+						dir.map[filename] = new Filesystem.File(file.getSource());
+					} else {
+						terminal.echo('chmod: file ' + filename + ' already not executable');
+					}
+				}
+			} else if (file instanceof Filesystem.Dir) {
+				terminal.echo('chmod: cannot change permissions of `' + args[2] + '\': Is a directory');
+			} else {
+				terminal.echo('chmod: cannot change permissions of `' + args[2] + '\': No such file or directory');
+			}
+		}));
+		fs.add('/bin', 'history', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				history = terminal.history,
+				i,
+				l = history.length,
+				chrs = (l / 10 | 0) + 2;
+			for (i = 0; i < l; i++) {
+				terminal.echo(Array(chrs - (i / 10 | 0)).join(' ') + (i + 1) + '  ' + history[i]);
+			}
+		}));
+		fs.add('/bin', 'img', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				line = document.createElement('div'),
+				img,
+				file = global.filesystem.get(args[1], global.path, global.home);
+			terminal.echo('', line);
+			if (file instanceof Filesystem.File && file.binaryContent !== null) {
+				line.removeChild(line.firstChild);
+				img = new Image();
+				img.className = 'embedded';
+				img.onload = function (e) {
+					URL.revokeObjectURL(e.target.src);
+					terminal.elements.inputLine.scrollIntoView();
+				};
+				img.src = URL.createObjectURL(file.binaryContent);
+				line.appendChild(img);
+			} else {
+				line.firstChild.textContent = 'img: could not render image';
+			}
+		}));
+		fs.add('/bin', 'wget', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dir = global.filesystem.get(global.path),
+				xhr = new XMLHttpRequest(),
+				line = document.createElement('div'),
+				href = args[1],
+				filename = href.substring(href.lastIndexOf('/') + 1) || 'index.html';
+			if (!dir.hasOwnProperty(filename)) {
+				terminal.print('getting ' + filename + ' *{black,white  }{gray          }* *0*/0* *', line);
+				line.childNodes[1].firstChild.textContent = '';
+				if (!isNaN(global.async)) {
+					global.async++;
+				}
+				xhr.addEventListener('progress', function (e) {
+					var progress = e.loaded / e.total * 10 | 0;
+					line.childNodes[1].firstChild.textContent = '__________'.substring(10 - progress);
+					line.childNodes[2].firstChild.textContent = '..........'.substring(progress);
+					line.childNodes[4].firstChild.textContent = e.loaded;
+					line.childNodes[5].firstChild.textContent = '/' + e.total;
+				}, false);
+				xhr.addEventListener('load', function (e) {
+					var progress = 10;
+					line.childNodes[1].firstChild.textContent = '__________'.substring(10 - progress);
+					line.childNodes[2].firstChild.textContent = '..........'.substring(progress);
+					line.childNodes[4].firstChild.textContent = e.loaded;
+					line.childNodes[5].firstChild.textContent = '/' + e.total;
+					dir.map[filename] = new Filesystem.File(e.target.response, null, global);
+					line.childNodes[6].firstChild.textContent = '  DONE';
+					if (!isNaN(global.async)) {
+						global.async--;
+						terminal.event.resume && terminal.event.resume();
+					}
+				}, false);
+				xhr.addEventListener('error', function (e) {
+					terminal.echo('error when getting ' + filename);
+					if (!isNaN(terminal.global.async)) {
+						terminal.global.async--;
+						terminal.event.resume && terminal.event.resume();
+					}
+				}, false);
+				xhr.responseType = 'blob';
+				xhr.open('GET', href);
+				xhr.send();
+			} else {
+				terminal.echo('wget: ' + filename + ': File already exists');
+			}
+		}));
+		fs.add('/bin', 'weblink', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				dir = global.filesystem.getPath();
+			//todo: finish
+		}));
+		fs.add('/bin', 'testinput', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				input = global.input || 'enter something:';
+			terminal.getInput(function (value) {
+				terminal.print(value);
+			}, input + ' ');
+		}));
+		fs.add('/bin', 'more', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				args = global.args,
+				file,
+				lines,
+				line = 0,
+				len,
+				linesPerScreen,
+				horizontal = 0,
+				charWidth,
+				formatted = false,
+				echoScreen = function () {
+					var i,
+						l = Math.min(len, line + linesPerScreen);
+					for (i = line; i < l; i++) {
+						if (!formatted) {
+							terminal.echo(lines[i]);
+						} else {
+							terminal.print(lines[i]);
+						}
+					}
+				};
+
+			if (args[1] === '-f') {
+				file = global.filesystem.get(args[2], global.path, global.home);
+				formatted = true;
+			} else {
+				file = global.filesystem.get(args[1], global.path, global.home);
+			}
+
+			if (file !== null) {
+				if (file instanceof Filesystem.File) {
+					if (file instanceof Filesystem.Executable) {
+						lines = file.getSource().replace(/\t/g, '    ').split('\n');
+					} else {
+						lines = file.textContent.replace(/\t/g, '    ').split('\n');
+					}
+					len = lines.length;
+					linesPerScreen = terminal.elements.pre.offsetHeight / terminal.elements.inputLine.offsetHeight | 0;
+					echoScreen();
+					if (len > linesPerScreen) {
+						terminal.hideInput();
+						terminal.pushEvent({
+							getPrefix: function () { return ''; },
+							onpress: function (terminal, keyCode, character, modifiers, e) {
+								if (keyCode === keyCodes.enter) {
+									line++;
+									if (!formatted) {
+										terminal.echo(lines[line + linesPerScreen] || '');
+									} else {
+										terminal.print(lines[line + linesPerScreen] || '');
+									}
+									e.preventDefault();
+									if (line + linesPerScreen >= len) {
+										terminal.popEvent();
+										terminal.showInput();
+									}
+								} else if (character === 'q') {
+									terminal.popEvent();
+									terminal.showInput();
+								}
+							}
+						});
+					}
+				} else {
+					terminal.echo('more: ' + args[1] + ': Is a directory');
+				}
+			} else {
+				terminal.echo('more: ' + args[1] + ': No such file or directory');
+			}
+		}));
+		fs.add('/bin', 'pwd', new Filesystem.Executable(function (global) {
+			global.terminal.echo(global.filesystem.getPath(global.path));
+		}));
+		fs.add('/bin', 'clear', new Filesystem.Executable(function (global) {
+			global.terminal.clear();
+		}));
+		fs.add('/bin', 'echo', new Filesystem.Executable(function (global) {
+			global.terminal.echo(global.input);
+		}));
+		fs.add('/bin', 'print', new Filesystem.Executable(function (global) {
+			global.terminal.print(global.input);
+		}));
+		fs.add('/bin', 'set', new Filesystem.Executable(function (global) {
+			var input = global.input,
+				findParts = /\s*(\S+)\s+(.+)*/,
+				wordChar = /\w/,
+				found = input.match(findParts);
+			if (found && found[1]) {
+				global[found[1]] = found[2] || '';
+			}
+		}));
+		fs.add('/bin', 'setenv', new Filesystem.Executable(function (global) {
+			var input = global.input,
+				findParts = /\s*(\S+)\s+(.+)*/,
+				wordChar = /\w/,
+				found = input.match(findParts);
+			if (found && found[1]) {
+				global.terminal.env[found[1]] = found[2] || '';
+			}
+		}));
+		fs.add('/', 'test1', new Filesystem.File('testing one two\ntesting one two three'));
+		fs.add('/', 'test2', new Filesystem.File('testing eight two\nfivetest one two three\ncow eats radish'));
+		window.fs = fs;
+
+		(function () {
+			var terminal = new Terminal(document.getElementById('terminal'), fs, {
+					home: '/home'
+				}),
+				greeting = document.getElementById('greeting'),
+				startup = document.getElementById('startup'),
+				lines = greeting.firstChild.textContent.split('\n'),
+				indent = (greeting.dataset ? greeting.dataset.indent : greeting['data-indent']) | 0,
+				i,
+				l = lines.length - 1;
+			greeting.style.display = 'none';
+			for (i = 0; i < l; i++) {
+				terminal.print(lines[i].substring(indent));
+			}
+			startup.style.display = 'none';
+			fs.add(terminal.home, 'startup', new Filesystem.Executable(startup.firstChild.textContent));
+			terminal.runCommand('/home/startup');
+			window.terminal = terminal;
+		}());
+	}());
+</script>
+	</body>
+</html>
