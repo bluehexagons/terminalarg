@@ -157,30 +157,38 @@
 				this.root = new Dir();
 			},
 			File = function File(data, options, global) {
-				var loadText, that;
+				var loadText,
+					that,
+					finishTextLoad;
 				this.href = options && options.location;
 				if (data instanceof Blob) {
 					this.binaryContent = data;
-					if (data.type.substring(0, 4) === 'text' || data.type.indexOf('javascript') !== -1) {
+					if (data.type.substring(0, 4) === 'text' ||
+							data.type.indexOf('javascript') !== -1 ||
+							(this.href && /\.(?:js|json|css|html?|md|txt)(?:[?#]|$)/i.test(this.href))) {
 						loadText = new FileReader();
 						that = this;
 						this.textContent = '[processing binary text file]';
 						if (global && !isNaN(global.async)) {
 							global.async++;
 						}
-						loadText.onload = function (e) {
-							that.textContent = e.target.result;
+						finishTextLoad = function () {
 							if (global && !isNaN(global.async)) {
 								global.async--;
 								global.terminal.event.resume && global.terminal.event.resume();
 							}
 						};
+						loadText.onload = function (e) {
+							that.textContent = e.target.result;
+							finishTextLoad();
+						};
 						loadText.onerror = function () {
 							that.textContent = '[could not read text file]';
-							if (global && !isNaN(global.async)) {
-								global.async--;
-								global.terminal.event.resume && global.terminal.event.resume();
-							}
+							finishTextLoad();
+						};
+						loadText.onabort = function () {
+							that.textContent = '[text file read aborted]';
+							finishTextLoad();
 						};
 						loadText.readAsText(data);
 					} else {
@@ -191,10 +199,6 @@
 					this.binaryContent = null;
 				}
 			},
-			NetworkFile = function NetworkFile(href, filename, options) {
-				this.href = href;
-				this.filename = filename;
-			},
 			findNotWhitespace = /\S/,
 			findEndWhitespace = /\s*$/,
 			asyncWaitEvent = function asyncWaitEvent(global, file, line) {
@@ -204,9 +208,9 @@
 				this.getPrefix = function () { return ''; };
 				this.resume = function () {
 					if (this.global.async <= 0) {
-						this.file.run(this.global, this.line);
-						this.global.terminal.popEvent();
+						this.global.terminal.popEvent(this);
 						this.global.terminal.showInput();
+						this.file.run(this.global, this.line);
 					}
 				};
 			},
@@ -216,11 +220,6 @@
 					i,
 					l,
 					args = global.args,
-					terminal = global.terminal,
-					path = terminal.path,
-					home = terminal.home,
-					filesystem = terminal.filesystem,
-					bin = terminal.bin,
 					local = global.local;
 				l = args.length;
 				for (i = 0; i < l; i++) {
@@ -241,17 +240,6 @@
 					} else {
 						global.value = line;
 						global.terminal.runCommand(global);
-						/*global.terminal.runCommand({
-							terminal: terminal,
-							args: null,
-							input: null,
-							value: line,
-							path: path,
-							home: home,
-							filesystem: filesystem,
-							bin: bin,
-							local: local
-						});*/
 					}
 				}
 			},
@@ -271,10 +259,6 @@
 						this.textContent = data;
 					}
 				}
-			},
-			FileLocation = function FileLocation(directory, name, file) {
-				this.directory = directory;
-				this.name = name;
 			};
 
 		Filesystem.prototype.add = function (path, filename, file) {
@@ -365,7 +349,10 @@
 	}(window));
 	window.keyCodes = {
 		backspace: 8,
+		delete: 46,
+		end: 35,
 		enter: 13,
+		home: 36,
 		tab: 9,
 		up: 38,
 		right: 39,
@@ -431,8 +418,11 @@
 				elements.capture.setAttribute('aria-label', 'Terminal command input');
 				elements.capture.setAttribute('autocomplete', 'off');
 				elements.capture.setAttribute('autocapitalize', 'none');
+				elements.capture.setAttribute('enterkeyhint', 'send');
+				elements.capture.setAttribute('inputmode', 'text');
 				elements.capture.setAttribute('spellcheck', 'false');
 				elements.capture.setAttribute('rows', '1');
+				elements.capture.setAttribute('wrap', 'off');
 				hostElement.appendChild(elements.capture);
 
 				setupListeners(this);
@@ -565,6 +555,13 @@
 						}
 					}
 				};
+				actions[keyCodes.delete] = function (terminal) {
+					if (terminal.cursor < terminal.value.length) {
+						terminal.value = terminal.value.substring(0, terminal.cursor) +
+							terminal.value.substring(terminal.cursor + 1);
+						updateText(terminal);
+					}
+				};
 				actions[keyCodes.up] = function (terminal) {
 					if (terminal.historyScroll === 0) {
 						terminal.currentValue = terminal.value;
@@ -596,6 +593,14 @@
 					terminal.cursor = Math.min(terminal.cursor + 1, terminal.value.length);
 					updateText(terminal);
 				};
+				actions[keyCodes.home] = function (terminal) {
+					terminal.cursor = 0;
+					updateText(terminal);
+				};
+				actions[keyCodes.end] = function (terminal) {
+					terminal.cursor = terminal.value.length;
+					updateText(terminal);
+				};
 				actions[keyCodes.tab] = completeInput;
 				actions[keyCodes.enter] = function (terminal) {
 					submitCommand(terminal, terminal.value);
@@ -605,6 +610,9 @@
 			textInputActions = (function () {
 				var actions = {};
 				actions[keyCodes.backspace] = specialActions[keyCodes.backspace];
+				actions[keyCodes.delete] = specialActions[keyCodes.delete];
+				actions[keyCodes.home] = specialActions[keyCodes.home];
+				actions[keyCodes.end] = specialActions[keyCodes.end];
 				actions[keyCodes.left] = specialActions[keyCodes.left];
 				actions[keyCodes.right] = specialActions[keyCodes.right];
 				actions[keyCodes.enter] = function (terminal) {
@@ -623,6 +631,7 @@
 				elements.inputAfter.textContent = terminal.value.substring(terminal.cursor + 1);
 			},
 			feedTyping = function (terminal, text) {
+				text = text.replace(/\r?\n/g, ' ');
 				terminal.value = terminal.value.substring(0, terminal.cursor) + text + terminal.value.substring(terminal.cursor);
 				terminal.cursor += text.length;
 				updateText(terminal);
@@ -668,7 +677,10 @@
 			}()),
 			keyCodesByKey = {
 				Backspace: keyCodes.backspace,
+				Delete: keyCodes.delete,
+				End: keyCodes.end,
 				Enter: keyCodes.enter,
+				Home: keyCodes.home,
 				Tab: keyCodes.tab,
 				ArrowUp: keyCodes.up,
 				ArrowRight: keyCodes.right,
@@ -690,11 +702,32 @@
 						if (text && terminal.event.oninput) {
 							terminal.event.oninput(terminal, text);
 						}
+					},
+					dispatchFallbackKey = function (keyCode, modifiers, e) {
+						if (terminal.event.onkeydown) {
+							terminal.event.onkeydown(terminal, keyCode, modifiers || 0, e);
+						}
 					};
 				capture.addEventListener('keydown', function (e) {
 					var keyCode = keyCodesByKey[e.key] || e.keyCode;
 					if (terminal.event.onkeydown) {
 						terminal.event.onkeydown(terminal, keyCode, getModifiers(e), e);
+					}
+				});
+				capture.addEventListener('beforeinput', function (e) {
+					if (e.inputType === 'deleteContentBackward' ||
+							e.inputType === 'deleteSoftLineBackward' ||
+							e.inputType === 'deleteHardLineBackward') {
+						dispatchFallbackKey(keyCodes.backspace, 0, e);
+					} else if (e.inputType === 'deleteWordBackward') {
+						dispatchFallbackKey(keyCodes.backspace, Modifiers.ctrl, e);
+					} else if (e.inputType === 'deleteContentForward' ||
+							e.inputType === 'deleteWordForward' ||
+							e.inputType === 'deleteSoftLineForward' ||
+							e.inputType === 'deleteHardLineForward') {
+						dispatchFallbackKey(keyCodes.delete, 0, e);
+					} else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
+						dispatchFallbackKey(keyCodes.enter, 0, e);
 					}
 				});
 				capture.addEventListener('input', function () {
@@ -727,6 +760,33 @@
 				}, 0);
 			},
 			formatChars = '*{}[]()',
+			isSafeHref = function (href) {
+				var url;
+				if (href === '#') {
+					return true;
+				}
+				try {
+					url = new URL(href, document.baseURI);
+					return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:';
+				} catch (error) {
+					return false;
+				}
+			},
+			findClosingParenthesis = function (text, openAt) {
+				var depth = 0,
+					i;
+				for (i = openAt; i < text.length; i++) {
+					if (text[i] === '(') {
+						depth++;
+					} else if (text[i] === ')') {
+						depth--;
+						if (depth === 0) {
+							return i;
+						}
+					}
+				}
+				return -1;
+			},
 			removeChildren = function (element) {
 				while (element.hasChildNodes()) {
 					element.removeChild(element.firstChild);
@@ -877,7 +937,9 @@
 				style,
 				escaped = false,
 				colorData,
+				colorSeparator,
 				textHrefSeparator,
+				textHrefEnd,
 				processingLink = false,
 				href,
 				anchorElement,
@@ -887,8 +949,10 @@
 			for (i = 0; i < l; i++) {
 				if (text[i] === '\\' && formatChars.indexOf(text[i + 1]) !== -1) {
 					escaped = true;
-				} else if (!escaped && text[i] === '{') {
-					colorData = text.substring(i + 1, text.indexOf(' ', i + 1));
+				} else if (!escaped && text[i] === '{' &&
+						(colorSeparator = text.indexOf(' ', i + 1)) !== -1 &&
+						text.indexOf('}', colorSeparator + 1) !== -1) {
+					colorData = text.substring(i + 1, colorSeparator);
 					if (colorData.indexOf(',') !== -1) {
 						styles.background = colorData.substring(colorData.indexOf(',') + 1);
 						if (colorData.indexOf(',') > 0) {
@@ -912,14 +976,14 @@
 					container = null;
 				} else if (!escaped && text[i] === '[' &&
 						(textHrefSeparator = text.indexOf('](', i)) !== -1 &&
-							(text.indexOf('[', i + 1) === -1 ||
+						(text.indexOf('[', i + 1) === -1 ||
 							text.indexOf('[', i + 1) > textHrefSeparator) &&
 						textHrefSeparator === text.indexOf(']', i) &&
-						text.indexOf(')', textHrefSeparator) !== -1) {
+						(textHrefEnd = findClosingParenthesis(text, textHrefSeparator + 1)) !== -1) {
 					anchorElement = document.createElement('a');
 					anchorElement.target = '_blank';
 					anchorElement.rel = 'noopener noreferrer';
-					href = text.substring(textHrefSeparator + 2, text.indexOf(')', textHrefSeparator));
+					href = text.substring(textHrefSeparator + 2, textHrefEnd);
 					//* is a command with a real URL at the end of it,
 					//## is just a command (anchor's href will be #)
 					if (href[0] === '*' || (href[0] === '#' && href[1] === '#')) {
@@ -937,7 +1001,15 @@
 							href = href.substring(href.lastIndexOf(' ') + 1);
 						}
 					}
-					anchorElement.href = href;
+					if (isSafeHref(href)) {
+						anchorElement.href = href;
+					} else {
+						anchorElement.href = '#';
+						anchorElement.title = 'Blocked unsafe link';
+						anchorElement.addEventListener('click', function (e) {
+							e.preventDefault();
+						});
+					}
 					newLine.appendChild(anchorElement);
 					segment = anchorElement;
 					container = null;
@@ -946,7 +1018,7 @@
 					segment = newLine;
 					container = null;
 					processingLink = false;
-					i = text.indexOf(')', i);
+					i = textHrefEnd;
 				} else {
 					if (container === null) {
 						container = document.createElement('span');
@@ -990,6 +1062,16 @@
 				terminal.echo(command + ': missing operand');
 				terminal.echo('usage: ' + usage);
 			},
+			validMutationName = function (terminal, command, filename) {
+				if (filename === '.' || filename === '..' || filename.indexOf('/') !== -1) {
+					terminal.echo(command + ': ' + filename + ': expected a name in the current folder');
+					return false;
+				}
+				return true;
+			},
+			escapeTerminalFormatting = function (text) {
+				return String(text).replace(/([*{}\[\]()])/g, '\\$1');
+			},
 			commandDocs = {
 				help: ['help [command]', 'Show the command guide or details for one command.', 'help wget'],
 				ls: ['ls', 'List files with colors for directories and executables.', 'ls'],
@@ -1004,7 +1086,7 @@
 				rm: ['rm <name>', 'Remove an in-memory file.', 'rm notes.txt'],
 				wget: ['wget <url>', 'Download a same-origin or CORS-enabled URL into the current folder.', 'wget thumbs/plot.png'],
 				img: ['img <file>', 'Display a downloaded image file.', 'img foodguide.png'],
-				chmod: ['chmod +x|-x <file>', 'Make a text file executable, or turn an executable back into text.', 'chmod +x scores.js'],
+				chmod: ['chmod +x|-x <file>', 'Change executable status. Only run scripts you trust; JavaScript executables run in this page.', 'chmod +x scores.js'],
 				history: ['history', 'Show commands entered in this session.', 'history'],
 				clear: ['clear', 'Clear terminal output without resetting files or history.', 'clear'],
 				echo: ['echo [text]', 'Print plain text.', 'echo \"hello terminal\"'],
@@ -1191,6 +1273,8 @@
 				dir = global.filesystem.get(global.path);
 			if (!args[1]) {
 				missingOperand(terminal, 'mkdir', 'mkdir <name>');
+			} else if (!validMutationName(terminal, 'mkdir', args[1])) {
+				return;
 			} else if (!owns(dir.map, args[1])) {
 				dir.map[args[1]] = new Filesystem.Dir();
 			} else {
@@ -1201,12 +1285,16 @@
 			var terminal = global.terminal,
 				args = global.args,
 				parent = global.filesystem.get(global.path),
-				target = parent.map[args[1]],
+				target,
 				contents = '';
 			if (!args[1]) {
 				missingOperand(terminal, 'rmdir', 'rmdir <name>');
 				return;
 			}
+			if (!validMutationName(terminal, 'rmdir', args[1])) {
+				return;
+			}
+			target = parent.map[args[1]];
 			if (target instanceof Filesystem.Dir) {
 				for (contents in target.map) {
 					if (owns(target.map, contents)) {
@@ -1220,8 +1308,10 @@
 				} else {
 					terminal.echo('rmdir: failed to remove `' + args[1] + '\': Directory not empty');
 				}
-			} else {
+			} else if (target) {
 				terminal.echo('rmdir: failed to remove `' + args[1] + '\': Not a directory');
+			} else {
+				terminal.echo('rmdir: failed to remove `' + args[1] + '\': No such file or directory');
 			}
 		}));
 		fs.add('/bin', 'touch', new Filesystem.Executable(function (global) {
@@ -1230,6 +1320,8 @@
 				dir = global.filesystem.get(global.path);
 			if (!args[1]) {
 				missingOperand(terminal, 'touch', 'touch <name>');
+			} else if (!validMutationName(terminal, 'touch', args[1])) {
+				return;
 			} else if (!owns(dir.map, args[1])) {
 				dir.map[args[1]] = new Filesystem.File('');
 			}
@@ -1240,6 +1332,8 @@
 				dir = global.filesystem.get(global.path);
 			if (!args[1]) {
 				missingOperand(terminal, 'rm', 'rm <name>');
+			} else if (!validMutationName(terminal, 'rm', args[1])) {
+				return;
 			} else if (owns(dir.map, args[1]) && dir.map[args[1]] instanceof Filesystem.File) {
 				delete dir.map[args[1]];
 			} else if (owns(dir.map, args[1]) && dir.map[args[1]] instanceof Filesystem.Dir) {
@@ -1352,6 +1446,9 @@
 				return;
 			}
 			filename = href.substring(href.lastIndexOf('/') + 1).split(/[?#]/)[0] || 'index.html';
+			if (filename === '.' || filename === '..') {
+				filename = 'index.html';
+			}
 			if (!owns(dir.map, filename)) {
 				terminal.print('getting ' + filename + ' *{black,white  }{gray          }* *0*/0* *', line);
 				line.childNodes[1].firstChild.textContent = '';
@@ -1377,7 +1474,7 @@
 					line.childNodes[2].firstChild.textContent = '..........'.substring(progress);
 					line.childNodes[4].firstChild.textContent = size;
 					line.childNodes[5].firstChild.textContent = '/' + size;
-					dir.map[filename] = new Filesystem.File(e.target.response, null, global);
+					dir.map[filename] = new Filesystem.File(e.target.response, {location: href}, global);
 					line.childNodes[6].firstChild.textContent = '  DONE';
 					finishAsync();
 				}, false);
@@ -1455,6 +1552,12 @@
 						terminal.echo('-- more (Enter: next line, q: quit) --');
 						terminal.pushEvent({
 							getPrefix: function () { return ''; },
+							oninput: function (terminal, text) {
+								if (text.toLowerCase().indexOf('q') !== -1) {
+									terminal.popEvent();
+									terminal.showInput();
+								}
+							},
 							onkeydown: function (terminal, keyCode, modifiers, e) {
 								if (keyCode === keyCodes.enter) {
 									e.preventDefault();
@@ -1527,7 +1630,7 @@
 				terminal.print('*' + name + '*');
 				terminal.echo('usage: ' + doc[0]);
 				terminal.echo(doc[1]);
-				terminal.print('example: [' + doc[2] + '](##' + doc[2] + ')');
+				terminal.print('example: [' + escapeTerminalFormatting(doc[2]) + '](##' + doc[2] + ')');
 				return;
 			}
 
@@ -1554,11 +1657,13 @@
 					command = categories[i][1][j];
 					doc = commandDocs[command];
 					terminal.print('    [' + command + '](##help ' + command + ')' +
-						Array(Math.max(2, 12 - command.length)).join(' ') + doc[1]);
+						Array(Math.max(2, 12 - command.length)).join(' ') +
+						escapeTerminalFormatting(doc[1]));
 				}
 			}
 			terminal.echo('');
-			terminal.echo('Keyboard: Tab completes names; Up/Down browse history; Left/Right move; Ctrl/Command+Backspace deletes a word.');
+			terminal.echo('Keyboard: Tab completes names; Up/Down browse history; arrows, Home, End, Backspace, and Delete edit the command.');
+			terminal.echo('Ctrl/Command+Backspace deletes a word. Touch keyboards, paste, and composed text are supported.');
 			terminal.echo('Tip: click any blue example to run it. Type help <command> for usage.');
 		}));
 		fs.add('/', 'test1', new Filesystem.File('testing one two\ntesting one two three'));

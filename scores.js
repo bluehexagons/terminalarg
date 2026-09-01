@@ -65,10 +65,10 @@ StudentList.prototype = {
 				usingStrings = true;
 				break;
 		}
-		if (this.students.length > 1 && typeof sortBy !== 'undefined') {
+		if (typeof sortBy !== 'undefined') {
 			return this.students.sort(function (a, b) {
-				var leftItem = usingStrings ? a[sortBy].toLowerCase() : a[sortBy];
-				var rightItem = usingStrings ? b[sortBy].toLowerCase() : b[sortBy];
+				var leftItem = usingStrings ? String(a[sortBy] || '').toLowerCase() : a[sortBy];
+				var rightItem = usingStrings ? String(b[sortBy] || '').toLowerCase() : b[sortBy];
 				if (leftItem < rightItem) {
 					return -1;
 				}
@@ -77,10 +77,8 @@ StudentList.prototype = {
 				}
 				return 0;
 			});
-		} else {
-			//why sort something with one or less elements?
-			return false;
 		}
+		return false;
 	},
 	
 	//adds a student to the list, returns the student added
@@ -98,7 +96,7 @@ StudentList.prototype = {
 				names.unshift('removed: ' + this.students.splice(index, 1));
 			} //else, this student is not a culprit for removal
 		}
-		return names;
+		return names.length ? names : ['no matching students'];
 	},
 	
 	//returns a list of students if there are any
@@ -342,18 +340,6 @@ var irrex = ( function () {
 var students = new StudentList();
 var maxScore = 100;
 var minScore = 0;
-var lastEntry = '';
-var lastValue = '';
-var historyIndex = 0;
-var historyLength = 32;
-var history = [];
-function addHistory(item) {
-	if (history.unshift(item) > historyLength) {
-		history.pop();
-	} //else, don't pop
-}
-var reset = true; //reset on backspace
-
 //defines an instance of a Student
 function Student(firstName, middleName, lastName, score) {
 	this.firstName = firstName;
@@ -378,13 +364,6 @@ function printConsole(text, stretch) {
 	}
 }
 
-//clears the console
-function clearConsole() {
-	while (consoleDiv.childNodes.length > 0) {
-		consoleDiv.removeChild(consoleDiv.firstChild);
-	}
-}
-
 //prints the statistics of the current student list
 function printStats() {
 	if (students.students.length > 0) {
@@ -402,16 +381,12 @@ function printStats() {
 	}
 }
 
-var EnterKey = 13,
-	UpKey = 38,
-	DownKey = 40,
-	backspaceKey = 8,
-	tabKey = 9;
-
 //event function should be given to the text area
 function takeInput(value) {
-	var command = value.split(' ')[0];
-	var text = value.substring(command.length + 1);
+	value = String(value || '').trim();
+	var commandEnd = value.search(/\s/);
+	var command = (commandEnd === -1 ? value : value.substring(0, commandEnd)).toLowerCase();
+	var text = commandEnd === -1 ? '' : value.substring(commandEnd).trim();
 
 	var add = false,
 		remove = false,
@@ -456,6 +431,7 @@ function takeInput(value) {
 		case 'q':
 		case 'exit':
 			exit = true;
+			break;
 		default:
 			break;
 	}
@@ -540,7 +516,6 @@ function takeInput(value) {
 	} else {
 		printConsole('unknown command: "' + command + '". try "help".');
 	}
-	//reset = true;
 	if (!exit) {
 		terminal.getInput(takeInput);
 	}

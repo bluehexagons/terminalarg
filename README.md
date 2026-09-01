@@ -18,3 +18,6 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000/index.htm>. A local server is required for the
 sample downloads used during startup.
+
+The virtual filesystem is temporary. Downloaded JavaScript executes in the page
+when you mark it executable and run it, so only execute scripts you trust.
