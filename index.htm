@@ -1,90 +1,106 @@
-<html>
+<!doctype html>
+<html lang="en">
 	<head>
-		<style type="text/css">
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+		<meta name="theme-color" content="#050505">
+		<link rel="icon" href="t.png" type="image/png">
+		<title>terminalarg — a tiny mock terminal</title>
+		<style>
 			@font-face {
 				font-family: Terminus;
 				src: local("Terminus"),
-					url(Terminus.ttf);
+					url(Terminus.ttf) format("truetype");
+				font-display: swap;
 			}
 			@font-face {
 				font-family: Terminus;
 				src: local("Terminus"),
-					url(TerminusBold.ttf);
+					url(TerminusBold.ttf) format("truetype");
 				font-weight: bold;
+				font-display: swap;
+			}
+
+			*, *::before, *::after {
+				box-sizing: border-box;
+			}
+
+			html {
+				min-height: 100%;
+				background: #050505;
+				color-scheme: dark;
 			}
 
 			body {
-				margin: 0px;
-				padding: 2px;
-				background: black;
+				min-height: 100vh;
+				min-height: 100dvh;
+				margin: 0;
+				padding: clamp(8px, 2vw, 20px);
+				background: radial-gradient(circle at top, #10141b 0, #050505 45rem);
 			}
-			#terminal {
-				font-family: Terminus;
-				width: 100%;
-				height: 100%;
-				background: black;
-				color: white;
-				position: relative;
-				overflow: auto;
 
+			#terminal {
+				min-height: calc(100vh - clamp(16px, 4vw, 40px));
+				min-height: calc(100dvh - clamp(16px, 4vw, 40px));
+				max-width: 1200px;
+				margin: 0 auto;
+				font-family: Terminus, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+				width: 100%;
+				background: rgba(0, 0, 0, 0.82);
+				color: #f3f6ff;
+				position: relative;
+				border: 1px solid #26303d;
+				border-radius: 8px;
+				box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+				padding: clamp(10px, 2vw, 18px);
+				overflow: auto;
+				overscroll-behavior: contain;
 				cursor: text;
 			}
+
 			#terminal pre {
 				display: block;
 				width: 100%;
-				height: 100%;
-				margin: 0px;
-				padding: 0px;
-
-				font-family: Terminus;
-				font-size: 16px;
-				width: 100%;
-				height: 100%;
-				background: black;
-				color: white;
-
-				word-wrap: auto;
+				min-height: 100%;
+				margin: 0;
+				padding: 0;
+				font: inherit;
+				font-size: clamp(15px, 1.6vw, 18px);
+				line-height: 1.3;
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+				tab-size: 4;
 			}
 
-			#terminal pre::selection {
+			#terminal ::selection {
 				background: white;
 				color: black;
 			}
 
-			#terminal textarea {
-				display: block;
-				width: 100%;
-				height: 100%;
-				padding: 0px;
-				margin: 0px;
-				position: absolute;
-				left: 0px;
-				top: 0px;
-				background: none;
-				border: none;
-
-				font-family: Terminus;
-				font-size: 16px;
-				width: 100%;
-				height: 100%;
-				background: black;
-				color: white;
-			}
-
-			#terminal textarea::selection {
-				background: white;
-				color: black;
+			.terminal-input {
+				position: fixed;
+				left: 0;
+				bottom: 0;
+				width: 1px;
+				height: 1px;
+				padding: 0;
+				border: 0;
+				opacity: 0.01;
+				resize: none;
+				pointer-events: none;
 			}
 
 			#terminal a {
-				color: #aaa;
+				color: #8bd5ff;
 				text-decoration: underline;
+				text-underline-offset: 0.15em;
 			}
 			#terminal a * {
 				text-decoration: underline;
 			}
-			#terminal a:hover {
-				color: #dedede;
+			#terminal a:hover,
+			#terminal a:focus-visible {
+				color: #d8f3ff;
 			}
 
 			#terminal img {
@@ -92,31 +108,50 @@
 			}
 
 			#terminal img.embedded {
-				padding: 3px;
+				display: block;
+				max-width: 100%;
+				height: auto;
+				padding: 6px 0;
 			}
 
 			.terminal-cursor {
 				background: white;
 				color: black;
+				animation: blink 1.1s steps(1, end) infinite;
+			}
+
+			#terminal:focus-within {
+				border-color: #52657a;
+			}
+
+			@keyframes blink {
+				50% { background: transparent; color: inherit; }
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				.terminal-cursor { animation: none; }
 			}
 		</style>
 	</head>
 	<body>
-		<pre id="greeting" data-indent="3">
+		<pre id="greeting" data-indent="3" hidden>
+			*terminalarg* — a tiny browser-based mock terminal
+			Type [help](##help) for commands, keyboard shortcuts, and things to try.
 		</pre>
-		<pre id="startup">
+		<pre id="startup" hidden>
 			wget thumbs/foodguide.png
 			wget scores.js
 			wait
 			img foodguide.png
 			chmod +x scores.js
 		</pre>
-		<div id="terminal"></div>
+		<main id="terminal" aria-label="Interactive mock terminal"></main>
+		<noscript>This mock terminal needs JavaScript enabled.</noscript>
 <script>
 	(function (global, name) {
 		'use strict';
 		var Dir = function Dir() {
-				this.map = {};
+				this.map = Object.create(null);
 			},
 			Filesystem = function Filesystem(serialized) {
 				this.root = new Dir();
@@ -137,7 +172,14 @@
 							that.textContent = e.target.result;
 							if (global && !isNaN(global.async)) {
 								global.async--;
-								terminal.event.resume && terminal.event.resume();
+								global.terminal.event.resume && global.terminal.event.resume();
+							}
+						};
+						loadText.onerror = function () {
+							that.textContent = '[could not read text file]';
+							if (global && !isNaN(global.async)) {
+								global.async--;
+								global.terminal.event.resume && global.terminal.event.resume();
 							}
 						};
 						loadText.readAsText(data);
@@ -215,12 +257,12 @@
 			},
 			findScriptType = /^\s*#([^\s]+)\s*\n/, //first arg will be type
 			Executable = function Executable(data, options) {
-				var type
+				var type;
 				//executables shouldn't be part of the file system, rework later
 				if (data instanceof Function) {
 					this.run = data;
 				} else {
-					type = findScriptType.exec(data.substring(0, data.indexOf(' ')));
+					type = findScriptType.exec(data);
 					if (type !== null && type[1].toLowerCase() === 'javascript') {
 						this.run = new Function('global', data.substring(data.indexOf('\n') + 1));
 					} else {
@@ -247,6 +289,8 @@
 			var split, i = 0, l,
 				current = '',
 				dest;
+			path = typeof path === 'string' && path ? path : '.';
+			from = from || '/';
 			if (path[0] === '~') {
 				current = home || '';
 				i = 1;
@@ -322,6 +366,7 @@
 	window.keyCodes = {
 		backspace: 8,
 		enter: 13,
+		tab: 9,
 		up: 38,
 		right: 39,
 		down: 40,
@@ -330,7 +375,7 @@
 	window.Modifiers = {
 		alt: 1,
 		ctrl: 2,
-		shift: 3
+		shift: 4
 	};
 	(function (global, name) {
 		'use strict';
@@ -365,6 +410,9 @@
 				elements = {};
 				this.elements = elements;
 				elements.pre = pre;
+				pre.setAttribute('role', 'log');
+				pre.setAttribute('aria-live', 'polite');
+				pre.setAttribute('aria-relevant', 'additions text');
 				elements.inputLine = document.createElement('div');
 				elements.pathText = document.createTextNode('');
 				elements.inputLine.appendChild(elements.pathText);
@@ -378,55 +426,129 @@
 				elements.inputAfter = document.createTextNode('');
 				elements.inputLine.appendChild(elements.inputAfter);
 				pre.appendChild(elements.inputLine);
+				elements.capture = document.createElement('textarea');
+				elements.capture.className = 'terminal-input';
+				elements.capture.setAttribute('aria-label', 'Terminal command input');
+				elements.capture.setAttribute('autocomplete', 'off');
+				elements.capture.setAttribute('autocapitalize', 'none');
+				elements.capture.setAttribute('spellcheck', 'false');
+				elements.capture.setAttribute('rows', '1');
+				hostElement.appendChild(elements.capture);
 
 				setupListeners(this);
+				this.updateWidth();
 				updateText(this);
 			},
 			getArgs = function (text) {
-				var inQuotes = 0,
-					args = [],
-					current = null,
-					ws = '\t ',
-					qt = ' \'"',
+				var args = [],
+					current = '',
+					quote = null,
+					escaped = false,
+					started = false,
 					i,
-					l = text.length,
 					ch;
-				for (i = 0; i < l; i++) {
+				for (i = 0; i < text.length; i++) {
 					ch = text[i];
-					if (current === null) {
-						if (ws.indexOf(ch) === -1) {
-							inQuotes = Math.max(qt.indexOf(ch), 0);
-							if (!inQuotes) {
-								current = ch;
-							} else {
-								current = '';
-							}
-						}
-					} else {
-						if ((!inQuotes && ws.indexOf(ch) !== -1) || (qt.indexOf(ch) === inQuotes)) {
-							args.push(current);
-							current = null;
-							inQuotes = 0;
+					if (escaped) {
+						current += ch;
+						escaped = false;
+						started = true;
+					} else if (ch === '\\' && quote !== "'") {
+						escaped = true;
+						started = true;
+					} else if (quote) {
+						if (ch === quote) {
+							quote = null;
 						} else {
 							current += ch;
 						}
+					} else if (ch === '"' || ch === "'") {
+						quote = ch;
+						started = true;
+					} else if (/\s/.test(ch)) {
+						if (started) {
+							args.push(current);
+							current = '';
+							started = false;
+						}
+					} else {
+						current += ch;
+						started = true;
 					}
 				}
-				if (current) {
+				if (escaped) {
+					current += '\\';
+				}
+				if (started) {
 					args.push(current);
 				}
 				return args;
 			},
-			findInput = /\w+\s+(.*)/,
+			findInput = /^\s*\S+\s*(.*)$/,
 			getInput = function (text) {
 				var match = text.match(findInput);
 				return match ? match[1] : '';
+			},
+			completeInput = function (terminal) {
+				var beforeCursor = terminal.value.substring(0, terminal.cursor),
+					tokenStart = beforeCursor.lastIndexOf(' ') + 1,
+					token = beforeCursor.substring(tokenStart),
+					names = [],
+					currentDir = terminal.filesystem.get(terminal.path),
+					candidates,
+					replacement;
+
+				if (tokenStart === 0 && terminal.bin) {
+					names = names.concat(Object.keys(terminal.bin.map));
+				}
+				if (currentDir instanceof Filesystem.Dir) {
+					names = names.concat(Object.keys(currentDir.map));
+				}
+				candidates = names.filter(function (name, index) {
+					return name.indexOf(token) === 0 && names.indexOf(name) === index;
+				}).sort();
+				if (candidates.length === 1) {
+					replacement = candidates[0];
+					terminal.value = terminal.value.substring(0, tokenStart) +
+						replacement + terminal.value.substring(terminal.cursor);
+					terminal.cursor = tokenStart + replacement.length;
+					updateText(terminal);
+				} else if (candidates.length > 1) {
+					terminal.echo(candidates.join('  '));
+					terminal.elements.inputLine.scrollIntoView({block: 'nearest'});
+				}
+			},
+			submitCommand = function (terminal, enteredValue) {
+				var command = enteredValue,
+					suffix;
+				terminal.echo(terminal.event.getPrefix(terminal) + enteredValue);
+				if (enteredValue.substring(0, 2) === '!!') {
+					if (!terminal.history.length) {
+						terminal.echo('!!: no commands in history');
+						terminal.resetInput();
+						return;
+					}
+					suffix = enteredValue.substring(2).trim();
+					command = terminal.history[terminal.history.length - 1] + (suffix ? ' ' + suffix : '');
+					terminal.echo('  -> ' + command);
+				}
+				if (command.trim()) {
+					terminal.history.push(command);
+					if (terminal.history.length > 100) {
+						terminal.history.shift();
+					}
+				}
+				terminal.historyScroll = 0;
+				terminal.currentValue = '';
+				terminal.resetInput();
+				terminal.runCommand(command);
+				terminal.elements.inputLine.scrollIntoView({block: 'nearest'});
 			},
 			specialActions = (function () {
 				var actions = {};
 				actions[keyCodes.backspace] = function (terminal, modifiers) {
 					var lastSpaceAt;
-					if (terminal.value.length > 0) {
+					if (terminal.cursor > 0) {
 						if (modifiers & Modifiers.ctrl) {
 							lastSpaceAt = terminal.value.lastIndexOf(' ', terminal.cursor - 1) + 1;
 							if (lastSpaceAt === terminal.cursor) {
@@ -474,37 +596,9 @@
 					terminal.cursor = Math.min(terminal.cursor + 1, terminal.value.length);
 					updateText(terminal);
 				};
+				actions[keyCodes.tab] = completeInput;
 				actions[keyCodes.enter] = function (terminal) {
-					var target,
-						global;
-					terminal.echo(terminal.event.getPrefix(terminal) + terminal.value);
-					if (terminal.value === '!!') {
-						terminal.value = terminal.history[terminal.history.length - 1];
-						terminal.historyScroll = 1;
-					} else if (terminal.value.substring(0, 2) === '!!') {
-						terminal.value = terminal.history[terminal.history.length - 1] + ' ' + terminal.value.substring(2);
-					}
-					if (terminal.historyScroll && terminal.value === terminal.history[terminal.history.length - terminal.historyScroll]) {
-						terminal.history.splice(terminal.history.length - terminal.historyScroll, 1);
-					}
-					terminal.history.push(terminal.value);
-					terminal.historyScroll = 0;
-					//args = getArgs(terminal.value);
-					global = {
-						terminal: terminal,
-						args: null,
-						input: null,
-						value: terminal.value,
-						path: terminal.path,
-						home: terminal.home,
-						filesystem: terminal.filesystem,
-						bin: terminal.bin,
-						local: {}
-					};
-
-					terminal.resetInput();
-					terminal.runCommand(global);
-					terminal.elements.inputLine.scrollIntoView();
+					submitCommand(terminal, terminal.value);
 				};
 				return actions;
 			}()),
@@ -528,29 +622,27 @@
 				elements.cursorText.textContent = terminal.value.substr(terminal.cursor, 1) || ' ';
 				elements.inputAfter.textContent = terminal.value.substring(terminal.cursor + 1);
 			},
-			feedTyping = function (terminal, keyCode, keyChar, modifiers) {
-				terminal.value = terminal.value.substring(0, terminal.cursor) + keyChar + terminal.value.substring(terminal.cursor);
-				terminal.cursor++;
+			feedTyping = function (terminal, text) {
+				terminal.value = terminal.value.substring(0, terminal.cursor) + text + terminal.value.substring(terminal.cursor);
+				terminal.cursor += text.length;
 				updateText(terminal);
 			},
-			feedKeys = function (terminal, keyCode, modifiers) {
-				specialActions[keyCode](terminal, modifiers);
-			},
 			terminalMainEvent = {
-				onpress: function (terminal, keyCode, character, modifiers, e) {
-					if (character && characters.indexOf(character) !== -1) {
-						feedTyping(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
-					}
+				oninput: function (terminal, text) {
+					feedTyping(terminal, text);
 				},
 				onkeydown: function (terminal, keyCode, modifiers, e) {
-					if (specialActions.hasOwnProperty(e.keyCode)) {
+					if (Object.prototype.hasOwnProperty.call(specialActions, keyCode)) {
 						e.preventDefault();
-						specialActions[e.keyCode](terminal, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
-						//feedKeys(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+						specialActions[keyCode](terminal, modifiers);
 					}
 				},
 				getPrefix: function (terminal) {
-					return (terminal.home ? terminal.path.replace(terminal.home, '~') : terminal.path) + '$ ';
+					var displayPath = terminal.path;
+					if (terminal.home && (displayPath === terminal.home || displayPath.indexOf(terminal.home + '/') === 0)) {
+						displayPath = '~' + displayPath.substring(terminal.home.length);
+					}
+					return displayPath + '$ ';
 				}
 			},
 			TerminalInputEvent = (function () {
@@ -559,16 +651,13 @@
 					this.prompt = prompt || '';
 				};
 				constructor.prototype = {
-					onpress: function (terminal, keyCode, character, modifiers, e) {
-						if (character && characters.indexOf(character) !== -1) {
-							feedTyping(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
-						}
+					oninput: function (terminal, text) {
+						feedTyping(terminal, text);
 					},
 					onkeydown: function (terminal, keyCode, modifiers, e) {
-						if (textInputActions.hasOwnProperty(e.keyCode)) {
+						if (Object.prototype.hasOwnProperty.call(textInputActions, keyCode)) {
 							e.preventDefault();
-							textInputActions[e.keyCode](terminal, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
-							//feedKeys(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift);
+							textInputActions[keyCode](terminal, modifiers);
 						}
 					},
 					getPrefix: function (terminal) {
@@ -577,17 +666,65 @@
 				};
 				return constructor;
 			}()),
-			//kind of a daft way to do it, but it's easy and doesn't require much code
-			characters = '`1234567890-=qwertyuiop[]\\asdfghjkl;\'zxcvbnm,./ ~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>?',
+			keyCodesByKey = {
+				Backspace: keyCodes.backspace,
+				Enter: keyCodes.enter,
+				Tab: keyCodes.tab,
+				ArrowUp: keyCodes.up,
+				ArrowRight: keyCodes.right,
+				ArrowDown: keyCodes.down,
+				ArrowLeft: keyCodes.left
+			},
+			getModifiers = function (e) {
+				return (e.altKey ? Modifiers.alt : 0) |
+					(e.ctrlKey || e.metaKey ? Modifiers.ctrl : 0) |
+					(e.shiftKey ? Modifiers.shift : 0);
+			},
 			setupListeners = function (terminal) {
-				var host = terminal.host;
-				addEventListener('keypress', function (e) {
-					var character = String.fromCharCode(e.keyCode);
-					terminal.event.onpress && terminal.event.onpress(terminal, e.keyCode, character, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift, e);
-				}, false);
-				addEventListener('keydown', function (e) {
-					terminal.event.onkeydown && terminal.event.onkeydown(terminal, e.keyCode, e.altKey * Modifiers.alt + e.ctrlKey * Modifiers.ctrl + e.shiftKey * Modifiers.shift, e);
-				}, false);
+				var host = terminal.host,
+					capture = terminal.elements.capture,
+					composing = false,
+					processInput = function () {
+						var text = capture.value;
+						capture.value = '';
+						if (text && terminal.event.oninput) {
+							terminal.event.oninput(terminal, text);
+						}
+					};
+				capture.addEventListener('keydown', function (e) {
+					var keyCode = keyCodesByKey[e.key] || e.keyCode;
+					if (terminal.event.onkeydown) {
+						terminal.event.onkeydown(terminal, keyCode, getModifiers(e), e);
+					}
+				});
+				capture.addEventListener('input', function () {
+					if (!composing) {
+						processInput();
+					}
+				});
+				capture.addEventListener('compositionstart', function () {
+					composing = true;
+				});
+				capture.addEventListener('compositionend', function () {
+					composing = false;
+					processInput();
+				});
+				host.addEventListener('click', function (e) {
+					if (!e.target.closest('a')) {
+						capture.focus({preventScroll: true});
+					}
+				});
+				global.addEventListener('resize', function () {
+					terminal.updateWidth();
+				});
+				if (document.fonts && document.fonts.ready) {
+					document.fonts.ready.then(function () {
+						terminal.updateWidth();
+					});
+				}
+				global.setTimeout(function () {
+					capture.focus({preventScroll: true});
+				}, 0);
 			},
 			formatChars = '*{}[]()',
 			removeChildren = function (element) {
@@ -596,18 +733,13 @@
 				}
 			},
 			//%local% %%global% %%%environment%
-			findVars = /%+(\w+)%/,
+			findVars = /(%+)(\w+)%/g,
 			varEnv = null,
 			varGlobal = null,
 			varLocal = null,
-			replaceVars = function (match, variable) {
-				if (match[1] === '%') {
-					if (match[2] === '%') {
-						return varEnv[variable];
-					}
-					return varGlobal[variable];
-				}
-				return varLocal[variable];
+			replaceVars = function (match, sigils, variable) {
+				var source = sigils.length >= 3 ? varEnv : (sigils.length === 2 ? varGlobal : varLocal);
+				return source && source[variable] !== undefined ? source[variable] : '';
 			};
 
 		Terminal.prototype.hideInput = function () {
@@ -617,7 +749,8 @@
 		Terminal.prototype.showInput = function () {
 			this.inputHidden = false;
 			this.elements.pre.appendChild(this.elements.inputLine);
-			this.elements.inputLine.scrollIntoView();
+			this.elements.inputLine.scrollIntoView({block: 'nearest'});
+			this.elements.capture.focus({preventScroll: true});
 		};
 		Terminal.prototype.pushEvent = function (evt) {
 			this.events.push(evt);
@@ -636,12 +769,29 @@
 		};
 		Terminal.prototype.getInput = function (callback, prompt) {
 			this.pushEvent(new TerminalInputEvent(callback, prompt));
-			terminal.resetInput();
+			this.resetInput();
 		};
 		Terminal.prototype.resetInput = function () {
 			this.cursor = 0;
 			this.value = '';
 			this.updateText();
+		};
+		Terminal.prototype.submitCommand = function (value) {
+			submitCommand(this, value);
+			this.elements.capture.focus({preventScroll: true});
+		};
+		Terminal.prototype.updateWidth = function () {
+			var probe = document.createElement('span'),
+				charWidth;
+			probe.textContent = '0000000000';
+			probe.style.position = 'absolute';
+			probe.style.visibility = 'hidden';
+			this.elements.pre.appendChild(probe);
+			charWidth = probe.getBoundingClientRect().width / 10;
+			probe.remove();
+			if (charWidth > 0) {
+				this.width = Math.max(20, Math.floor(this.elements.pre.clientWidth / charWidth));
+			}
 		};
 		Terminal.prototype.runCommand = function (global) {
 			var terminal,
@@ -668,7 +818,7 @@
 			}
 
 			terminal = global.terminal;
-			input = global.value;
+			input = String(global.value || '');
 			path = global.path;
 			home = global.home;
 			filesystem = global.filesystem;
@@ -768,6 +918,7 @@
 						text.indexOf(')', textHrefSeparator) !== -1) {
 					anchorElement = document.createElement('a');
 					anchorElement.target = '_blank';
+					anchorElement.rel = 'noopener noreferrer';
 					href = text.substring(textHrefSeparator + 2, text.indexOf(')', textHrefSeparator));
 					//* is a command with a real URL at the end of it,
 					//## is just a command (anchor's href will be #)
@@ -777,18 +928,7 @@
 						anchorElement.addEventListener('click', function (e) {
 							if (e.button === 0) { //only respond to left clicks
 								e.preventDefault();
-								terminal.print(terminal.event.getPrefix(terminal) + e.target.parentNode.dataset.command);
-								terminal.runCommand({
-									terminal: terminal,
-									args: null,
-									input: null,
-									value: e.target.parentNode.dataset.command,
-									path: terminal.path,
-									home: terminal.home,
-									filesystem: terminal.filesystem,
-									bin: terminal.bin,
-									local: {}
-								});
+								terminal.submitCommand(e.currentTarget.dataset.command);
 							}
 						});
 						if (href[0] === '#') {
@@ -842,7 +982,37 @@
 
 	(function () {
 		'use strict';
-		var fs = new Filesystem();
+		var fs = new Filesystem(),
+			owns = function (object, property) {
+				return Object.prototype.hasOwnProperty.call(object, property);
+			},
+			missingOperand = function (terminal, command, usage) {
+				terminal.echo(command + ': missing operand');
+				terminal.echo('usage: ' + usage);
+			},
+			commandDocs = {
+				help: ['help [command]', 'Show the command guide or details for one command.', 'help wget'],
+				ls: ['ls', 'List files with colors for directories and executables.', 'ls'],
+				dir: ['dir', 'List filenames without colors (an ls alternative).', 'dir'],
+				cd: ['cd [path]', 'Change folders; cd with no path returns home.', 'cd /'],
+				pwd: ['pwd', 'Print the current folder.', 'pwd'],
+				cat: ['cat [-f] <file>', 'Read a file; -f renders terminal formatting.', 'cat test1'],
+				more: ['more [-f] <file>', 'Read a file one screen at a time; Enter advances and q quits.', 'more /bin/help'],
+				mkdir: ['mkdir <name>', 'Create an in-memory folder.', 'mkdir sandbox'],
+				rmdir: ['rmdir <name>', 'Remove an empty in-memory folder.', 'rmdir sandbox'],
+				touch: ['touch <name>', 'Create an empty in-memory file.', 'touch notes.txt'],
+				rm: ['rm <name>', 'Remove an in-memory file.', 'rm notes.txt'],
+				wget: ['wget <url>', 'Download a same-origin or CORS-enabled URL into the current folder.', 'wget thumbs/plot.png'],
+				img: ['img <file>', 'Display a downloaded image file.', 'img foodguide.png'],
+				chmod: ['chmod +x|-x <file>', 'Make a text file executable, or turn an executable back into text.', 'chmod +x scores.js'],
+				history: ['history', 'Show commands entered in this session.', 'history'],
+				clear: ['clear', 'Clear terminal output without resetting files or history.', 'clear'],
+				echo: ['echo [text]', 'Print plain text.', 'echo \"hello terminal\"'],
+				print: ['print [formatted text]', 'Print formatted text using *bold* and {color text} markup.', 'print *hello* {skyblue world}'],
+				set: ['set <name> <value>', 'Set a value for the current terminal script.', 'set message hello'],
+				setenv: ['setenv <name> <value>', 'Set a persistent session variable, referenced as %%%name%.', 'setenv color blue'],
+				testinput: ['testinput [prompt]', 'Open a nested prompt and echo what you enter.', 'testinput say-something:']
+			};
 		fs.add('/', 'home', new Filesystem.Dir());
 		fs.add('/', 'bin', new Filesystem.Dir());
 		fs.add('/bin', 'cd', new Filesystem.Executable(function (global) {
@@ -879,7 +1049,7 @@
 				l,
 				line;
 			for (f in map) {
-				if (map.hasOwnProperty(f)) {
+				if (owns(map, f)) {
 					files.push(f);
 					lengths.push(f.length);
 				}
@@ -930,7 +1100,7 @@
 				color,
 				end;
 			for (f in map) {
-				if (map.hasOwnProperty(f)) {
+				if (owns(map, f)) {
 					files.push(map[f]);
 					names.push(f);
 					lengths.push(f.length);
@@ -975,18 +1145,24 @@
 			var terminal = global.terminal,
 				args = global.args,
 				file,
+				filename,
 				lines,
 				i,
 				l,
 				formatted = false;
 
 			if (args[1] === '-f') {
-				file = global.filesystem.get(args[2], global.path, global.home);
+				filename = args[2];
 				formatted = true;
 			} else {
-				file = global.filesystem.get(args[1], global.path, global.home);
+				filename = args[1];
 			}
-			
+			if (!filename) {
+				missingOperand(terminal, 'cat', 'cat [-f] <file>');
+				return;
+			}
+			file = global.filesystem.get(filename, global.path, global.home);
+
 			if (file !== null) {
 				if (file instanceof Filesystem.File) {
 					if (file instanceof Filesystem.Executable) {
@@ -1003,17 +1179,19 @@
 						}
 					}
 				} else {
-					terminal.echo('cat: ' + args[1] + ': Is a directory');
+					terminal.echo('cat: ' + filename + ': Is a directory');
 				}
 			} else {
-				terminal.echo('cat: ' + args[1] + ': No such file or directory');
+				terminal.echo('cat: ' + filename + ': No such file or directory');
 			}
 		}));
 		fs.add('/bin', 'mkdir', new Filesystem.Executable(function (global) {
 			var terminal = global.terminal,
 				args = global.args,
 				dir = global.filesystem.get(global.path);
-			if (!dir.map.hasOwnProperty(args[1])) {
+			if (!args[1]) {
+				missingOperand(terminal, 'mkdir', 'mkdir <name>');
+			} else if (!owns(dir.map, args[1])) {
 				dir.map[args[1]] = new Filesystem.Dir();
 			} else {
 				terminal.echo('mkdir: cannot create directory `' + args[1] + '\': File exists');
@@ -1025,9 +1203,13 @@
 				parent = global.filesystem.get(global.path),
 				target = parent.map[args[1]],
 				contents = '';
+			if (!args[1]) {
+				missingOperand(terminal, 'rmdir', 'rmdir <name>');
+				return;
+			}
 			if (target instanceof Filesystem.Dir) {
 				for (contents in target.map) {
-					if (target.map.hasOwnProperty(contents)) {
+					if (owns(target.map, contents)) {
 						contents = ' ';
 						break;
 					}
@@ -1046,7 +1228,9 @@
 			var terminal = global.terminal,
 				args = global.args,
 				dir = global.filesystem.get(global.path);
-			if (!dir.map.hasOwnProperty(args[1])) {
+			if (!args[1]) {
+				missingOperand(terminal, 'touch', 'touch <name>');
+			} else if (!owns(dir.map, args[1])) {
 				dir.map[args[1]] = new Filesystem.File('');
 			}
 		}));
@@ -1054,9 +1238,11 @@
 			var terminal = global.terminal,
 				args = global.args,
 				dir = global.filesystem.get(global.path);
-			if (dir.map.hasOwnProperty(args[1]) && dir.map[args[1]] instanceof Filesystem.File) {
+			if (!args[1]) {
+				missingOperand(terminal, 'rm', 'rm <name>');
+			} else if (owns(dir.map, args[1]) && dir.map[args[1]] instanceof Filesystem.File) {
 				delete dir.map[args[1]];
-			} else if (dir.map.hasOwnProperty(args[1]) && dir.map[args[1]] instanceof Filesystem.Directory) {
+			} else if (owns(dir.map, args[1]) && dir.map[args[1]] instanceof Filesystem.Dir) {
 				terminal.echo('rm: cannot remove `' + args[1] + '\': Is a directory');
 			} else {
 				terminal.echo('rm: cannot remove `' + args[1] + '\': No such file or directory');
@@ -1065,10 +1251,17 @@
 		fs.add('/bin', 'chmod', new Filesystem.Executable(function (global) {
 			var terminal = global.terminal,
 				args = global.args,
-				dirPath = global.filesystem.getPath(args[2], global.path, global.home),
-				filename = dirPath.substring(dirPath.lastIndexOf('/') + 1),
+				dirPath,
+				filename,
 				dir,
-				file = global.filesystem.get(args[2], global.path, global.home);
+				file;
+			if (!args[1] || !args[2]) {
+				missingOperand(terminal, 'chmod', 'chmod +x|-x <file>');
+				return;
+			}
+			dirPath = global.filesystem.getPath(args[2], global.path, global.home);
+			filename = dirPath.substring(dirPath.lastIndexOf('/') + 1);
+			file = global.filesystem.get(args[2], global.path, global.home);
 			dirPath = dirPath.substring(0, dirPath.lastIndexOf('/')) || '/';
 			dir = global.filesystem.get(dirPath);
 			if (file instanceof Filesystem.File) {
@@ -1084,6 +1277,8 @@
 					} else {
 						terminal.echo('chmod: file ' + filename + ' already not executable');
 					}
+				} else {
+					terminal.echo('chmod: expected +x or -x');
 				}
 			} else if (file instanceof Filesystem.Dir) {
 				terminal.echo('chmod: cannot change permissions of `' + args[2] + '\': Is a directory');
@@ -1106,15 +1301,25 @@
 				args = global.args,
 				line = document.createElement('div'),
 				img,
-				file = global.filesystem.get(args[1], global.path, global.home);
+				file;
+			if (!args[1]) {
+				missingOperand(terminal, 'img', 'img <file>');
+				return;
+			}
+			file = global.filesystem.get(args[1], global.path, global.home);
 			terminal.echo('', line);
 			if (file instanceof Filesystem.File && file.binaryContent !== null) {
 				line.removeChild(line.firstChild);
 				img = new Image();
 				img.className = 'embedded';
+				img.alt = args[1];
 				img.onload = function (e) {
 					URL.revokeObjectURL(e.target.src);
-					terminal.elements.inputLine.scrollIntoView();
+					terminal.elements.inputLine.scrollIntoView({block: 'nearest'});
+				};
+				img.onerror = function (e) {
+					URL.revokeObjectURL(e.target.src);
+					line.textContent = 'img: could not decode image';
 				};
 				img.src = URL.createObjectURL(file.binaryContent);
 				line.appendChild(img);
@@ -1129,52 +1334,69 @@
 				xhr = new XMLHttpRequest(),
 				line = document.createElement('div'),
 				href = args[1],
-				filename = href.substring(href.lastIndexOf('/') + 1) || 'index.html';
-			if (!dir.hasOwnProperty(filename)) {
+				filename,
+				finished = false,
+				finishAsync = function () {
+					if (!finished && !isNaN(global.async)) {
+						finished = true;
+						global.async--;
+						terminal.event.resume && terminal.event.resume();
+					}
+				},
+				fail = function (message) {
+					line.textContent = 'wget: ' + message;
+					finishAsync();
+				};
+			if (!href) {
+				missingOperand(terminal, 'wget', 'wget <url>');
+				return;
+			}
+			filename = href.substring(href.lastIndexOf('/') + 1).split(/[?#]/)[0] || 'index.html';
+			if (!owns(dir.map, filename)) {
 				terminal.print('getting ' + filename + ' *{black,white  }{gray          }* *0*/0* *', line);
 				line.childNodes[1].firstChild.textContent = '';
 				if (!isNaN(global.async)) {
 					global.async++;
 				}
 				xhr.addEventListener('progress', function (e) {
-					var progress = e.loaded / e.total * 10 | 0;
+					var progress = e.lengthComputable && e.total ? e.loaded / e.total * 10 | 0 : 0;
 					line.childNodes[1].firstChild.textContent = '__________'.substring(10 - progress);
 					line.childNodes[2].firstChild.textContent = '..........'.substring(progress);
 					line.childNodes[4].firstChild.textContent = e.loaded;
-					line.childNodes[5].firstChild.textContent = '/' + e.total;
+					line.childNodes[5].firstChild.textContent = e.lengthComputable ? '/' + e.total : '';
 				}, false);
 				xhr.addEventListener('load', function (e) {
-					var progress = 10;
+					var progress = 10,
+						size;
+					if (xhr.status < 200 || xhr.status >= 300) {
+						fail(filename + ': request failed (' + xhr.status + ')');
+						return;
+					}
+					size = e.target.response.size;
 					line.childNodes[1].firstChild.textContent = '__________'.substring(10 - progress);
 					line.childNodes[2].firstChild.textContent = '..........'.substring(progress);
-					line.childNodes[4].firstChild.textContent = e.loaded;
-					line.childNodes[5].firstChild.textContent = '/' + e.total;
+					line.childNodes[4].firstChild.textContent = size;
+					line.childNodes[5].firstChild.textContent = '/' + size;
 					dir.map[filename] = new Filesystem.File(e.target.response, null, global);
 					line.childNodes[6].firstChild.textContent = '  DONE';
-					if (!isNaN(global.async)) {
-						global.async--;
-						terminal.event.resume && terminal.event.resume();
-					}
+					finishAsync();
 				}, false);
-				xhr.addEventListener('error', function (e) {
-					terminal.echo('error when getting ' + filename);
-					if (!isNaN(terminal.global.async)) {
-						terminal.global.async--;
-						terminal.event.resume && terminal.event.resume();
-					}
+				xhr.addEventListener('error', function () {
+					fail(filename + ': network error');
 				}, false);
-				xhr.responseType = 'blob';
+				xhr.addEventListener('abort', function () {
+					fail(filename + ': request aborted');
+				}, false);
+				xhr.addEventListener('timeout', function () {
+					fail(filename + ': request timed out');
+				}, false);
 				xhr.open('GET', href);
+				xhr.responseType = 'blob';
+				xhr.timeout = 15000;
 				xhr.send();
 			} else {
 				terminal.echo('wget: ' + filename + ': File already exists');
 			}
-		}));
-		fs.add('/bin', 'weblink', new Filesystem.Executable(function (global) {
-			var terminal = global.terminal,
-				args = global.args,
-				dir = global.filesystem.getPath();
-			//todo: finish
 		}));
 		fs.add('/bin', 'testinput', new Filesystem.Executable(function (global) {
 			var terminal = global.terminal,
@@ -1187,12 +1409,11 @@
 			var terminal = global.terminal,
 				args = global.args,
 				file,
+				filename,
 				lines,
 				line = 0,
 				len,
 				linesPerScreen,
-				horizontal = 0,
-				charWidth,
 				formatted = false,
 				echoScreen = function () {
 					var i,
@@ -1207,11 +1428,16 @@
 				};
 
 			if (args[1] === '-f') {
-				file = global.filesystem.get(args[2], global.path, global.home);
+				filename = args[2];
 				formatted = true;
 			} else {
-				file = global.filesystem.get(args[1], global.path, global.home);
+				filename = args[1];
 			}
+			if (!filename) {
+				missingOperand(terminal, 'more', 'more [-f] <file>');
+				return;
+			}
+			file = global.filesystem.get(filename, global.path, global.home);
 
 			if (file !== null) {
 				if (file instanceof Filesystem.File) {
@@ -1221,26 +1447,29 @@
 						lines = file.textContent.replace(/\t/g, '    ').split('\n');
 					}
 					len = lines.length;
-					linesPerScreen = terminal.elements.pre.offsetHeight / terminal.elements.inputLine.offsetHeight | 0;
+					linesPerScreen = Math.max(1,
+						(window.innerHeight / terminal.elements.inputLine.offsetHeight | 0) - 3);
 					echoScreen();
 					if (len > linesPerScreen) {
 						terminal.hideInput();
+						terminal.echo('-- more (Enter: next line, q: quit) --');
 						terminal.pushEvent({
 							getPrefix: function () { return ''; },
-							onpress: function (terminal, keyCode, character, modifiers, e) {
+							onkeydown: function (terminal, keyCode, modifiers, e) {
 								if (keyCode === keyCodes.enter) {
+									e.preventDefault();
 									line++;
 									if (!formatted) {
-										terminal.echo(lines[line + linesPerScreen] || '');
+										terminal.echo(lines[line + linesPerScreen - 1] || '');
 									} else {
-										terminal.print(lines[line + linesPerScreen] || '');
+										terminal.print(lines[line + linesPerScreen - 1] || '');
 									}
-									e.preventDefault();
 									if (line + linesPerScreen >= len) {
 										terminal.popEvent();
 										terminal.showInput();
 									}
-								} else if (character === 'q') {
+								} else if (e.key && e.key.toLowerCase() === 'q') {
+									e.preventDefault();
 									terminal.popEvent();
 									terminal.showInput();
 								}
@@ -1248,10 +1477,10 @@
 						});
 					}
 				} else {
-					terminal.echo('more: ' + args[1] + ': Is a directory');
+					terminal.echo('more: ' + filename + ': Is a directory');
 				}
 			} else {
-				terminal.echo('more: ' + args[1] + ': No such file or directory');
+				terminal.echo('more: ' + filename + ': No such file or directory');
 			}
 		}));
 		fs.add('/bin', 'pwd', new Filesystem.Executable(function (global) {
@@ -1261,28 +1490,76 @@
 			global.terminal.clear();
 		}));
 		fs.add('/bin', 'echo', new Filesystem.Executable(function (global) {
-			global.terminal.echo(global.input);
+			global.terminal.echo(global.args.slice(1).join(' '));
 		}));
 		fs.add('/bin', 'print', new Filesystem.Executable(function (global) {
 			global.terminal.print(global.input);
 		}));
 		fs.add('/bin', 'set', new Filesystem.Executable(function (global) {
-			var input = global.input,
-				findParts = /\s*(\S+)\s+(.+)*/,
-				wordChar = /\w/,
-				found = input.match(findParts);
-			if (found && found[1]) {
-				global[found[1]] = found[2] || '';
+			if (global.args[1]) {
+				global[global.args[1]] = global.args.slice(2).join(' ');
+			} else {
+				missingOperand(global.terminal, 'set', 'set <name> <value>');
 			}
 		}));
 		fs.add('/bin', 'setenv', new Filesystem.Executable(function (global) {
-			var input = global.input,
-				findParts = /\s*(\S+)\s+(.+)*/,
-				wordChar = /\w/,
-				found = input.match(findParts);
-			if (found && found[1]) {
-				global.terminal.env[found[1]] = found[2] || '';
+			if (global.args[1]) {
+				global.terminal.env[global.args[1]] = global.args.slice(2).join(' ');
+			} else {
+				missingOperand(global.terminal, 'setenv', 'setenv <name> <value>');
 			}
+		}));
+		fs.add('/bin', 'help', new Filesystem.Executable(function (global) {
+			var terminal = global.terminal,
+				name = global.args[1],
+				doc,
+				categories,
+				i,
+				j,
+				command;
+			if (name) {
+				doc = commandDocs[name];
+				if (!doc) {
+					terminal.echo('help: no help topic for ' + name);
+					terminal.echo('Type help to see every command.');
+					return;
+				}
+				terminal.print('*' + name + '*');
+				terminal.echo('usage: ' + doc[0]);
+				terminal.echo(doc[1]);
+				terminal.print('example: [' + doc[2] + '](##' + doc[2] + ')');
+				return;
+			}
+
+			terminal.print('*terminalarg help*');
+			terminal.echo('This is a playful, in-memory shell. Files you create or download reset when the page reloads.');
+			terminal.echo('');
+			terminal.print('*Things to try*');
+			terminal.print('  [ls](##ls)                         explore your home folder');
+			terminal.print('  [img foodguide.png](##img foodguide.png)          show the downloaded sample image');
+			terminal.print('  [./scores.js](##./scores.js)                launch the interactive score app (then type help)');
+			terminal.print('  [mkdir sandbox](##mkdir sandbox)              create a folder to experiment in');
+			terminal.print('  [setenv mood curious](##setenv mood curious)       set a variable, then try echo %%%mood%');
+			terminal.echo('');
+			terminal.print('*Available commands*');
+			categories = [
+				['Explore', ['help', 'ls', 'dir', 'cd', 'pwd', 'history', 'clear']],
+				['Files', ['cat', 'more', 'mkdir', 'rmdir', 'touch', 'rm']],
+				['Download & run', ['wget', 'img', 'chmod']],
+				['Text & scripts', ['echo', 'print', 'set', 'setenv', 'testinput']]
+			];
+			for (i = 0; i < categories.length; i++) {
+				terminal.echo('  ' + categories[i][0] + ':');
+				for (j = 0; j < categories[i][1].length; j++) {
+					command = categories[i][1][j];
+					doc = commandDocs[command];
+					terminal.print('    [' + command + '](##help ' + command + ')' +
+						Array(Math.max(2, 12 - command.length)).join(' ') + doc[1]);
+				}
+			}
+			terminal.echo('');
+			terminal.echo('Keyboard: Tab completes names; Up/Down browse history; Left/Right move; Ctrl/Command+Backspace deletes a word.');
+			terminal.echo('Tip: click any blue example to run it. Type help <command> for usage.');
 		}));
 		fs.add('/', 'test1', new Filesystem.File('testing one two\ntesting one two three'));
 		fs.add('/', 'test2', new Filesystem.File('testing eight two\nfivetest one two three\ncow eats radish'));

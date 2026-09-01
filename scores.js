@@ -7,7 +7,7 @@ function StudentList() {
 StudentList.prototype = {
 	//calculates the standard deviation of the scores of students in the provided array
 	deviation: function deviation() {
-		if (this.students.length === 0) {
+		if (this.students.length < 2) {
 			return 0;
 		} //else, continue
 		var total = 0;
@@ -35,7 +35,7 @@ StudentList.prototype = {
 	//calculates variance
 	variance: function variance() {
 		var Square = 2;
-		var variance = Math.pow(this.deviation(), Square);
+		return Math.pow(this.deviation(), Square);
 	},
 	
 	//sorts the students in the given array, and returns a copy of the array as sorted
@@ -66,14 +66,16 @@ StudentList.prototype = {
 				break;
 		}
 		if (this.students.length > 1 && typeof sortBy !== 'undefined') {
-			var bitMask = 1;
-			var offset = -1;
-			var letsOneBecomeTwoAndZeroStayZero = 2;
 			return this.students.sort(function (a, b) {
-				// -1 if a is less than b; 0 if they're equal; 1 if a is greater than b
 				var leftItem = usingStrings ? a[sortBy].toLowerCase() : a[sortBy];
 				var rightItem = usingStrings ? b[sortBy].toLowerCase() : b[sortBy];
-				return (leftItem > rightItem & bitMask) * letsOneBecomeTwoAndZeroStayZero + offset + (leftItem === rightItem & bitMask);
+				if (leftItem < rightItem) {
+					return -1;
+				}
+				if (leftItem > rightItem) {
+					return 1;
+				}
+				return 0;
 			});
 		} else {
 			//why sort something with one or less elements?
@@ -89,14 +91,11 @@ StudentList.prototype = {
 	
 	//removes students from the list, returns a list of text describing the removed students
 	remove: function remove(firstName, middleName, lastName) {
-		var removed = 0;
 		var names = [];
-		for (var index = 0;index < this.students.length;index++) {
+		for (var index = this.students.length - 1; index >= 0; index--) {
 			var student = this.students[index];
 			if (student.firstName === firstName && student.lastName === lastName && student.middleName === middleName) {
-				names.push('removed: ' + this.students.splice(index - removed,1));
-				removed++;
-				index--; //take a step back since we just removed an item
+				names.unshift('removed: ' + this.students.splice(index, 1));
 			} //else, this student is not a culprit for removal
 		}
 		return names;
@@ -113,7 +112,7 @@ StudentList.prototype = {
 	
 	//returns student details
 	details: function details() {
-		list = [];
+		var list = [];
 		for (var index = 0; index < this.students.length; index++) {
 			var student = this.students[index];
 			list.push('first: ' + student.firstName + (student.middleName ? '; middle: ' + student.middleName : '') + '; last: ' + student.lastName + '; score: ' + student.score);
@@ -533,7 +532,7 @@ function takeInput(value) {
 			
 	} else if (inspect) { //inspects students (to show for sure that nothing is faked)
 		printConsole(students.details());
-	} else if (this.value === '') { //prints a separator
+	} else if (value === '') { //prints a separator
 		printConsole('---');
 		
 	} else if (exit) {
